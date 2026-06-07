@@ -1,0 +1,9 @@
+{
+  "folders": [{ "path": "." }],
+  "settings": {},
+  "extensions": { "recommendations": [
+    "VEXRobotics.vexcode",
+    "ms-vscode.cpptools",
+    "radiant.radiant-vex"
+  ] }
+}

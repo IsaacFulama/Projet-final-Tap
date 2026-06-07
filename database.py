@@ -1,0 +1,154 @@
+import mysql.connector
+from mysql.connector import Error
+from tkinter import messagebox
+from datetime import datetime
+
+def obtenir_connexion():
+    return mysql.connector.connect(
+        host='localhost',
+        database='gestion_loyers',
+        user='root',
+        password=''
+    )
+
+def inserer_souscription(nom, prenom, telephone, mois, montant, devise):
+    try:
+        conn = obtenir_connexion()
+        if conn.is_connected():
+            cursor = conn.cursor()
+            
+            cursor.execute('SELECT id FROM locataires WHERE nom = %s AND prenom = %s', (nom, prenom))
+            result = cursor.fetchone()
+            
+            if result:
+                locataire_id = result[0]
+            else:
+                cursor.execute('INSERT INTO locataires (nom, prenom, telephone) VALUES (%s, %s, %s)', (nom, prenom, telephone))
+                locataire_id = cursor.lastrowid
+            
+            # Statut par défaut: En attente
+            cursor.execute('INSERT INTO paiements (locataire_id, mois, montant, devise, statut) VALUES (%s, %s, %s, %s, %s)', (locataire_id, mois, montant, devise, 'En attente'))
+            
+            conn.commit()
+            return True, 'Enregistrement réussi avec succès !'
+            
+    except Error as e:
+        return False, f'Erreur de base de données : {e}'
+    finally:
+        if 'conn' in locals() and conn.is_connected():
+            cursor.close()
+            conn.close()
+
+def get_souscriptions(filtre_nom='', filtre_statut='Tous'):
+    try:
+        conn = obtenir_connexion()
+        cursor = conn.cursor()
+        
+        query = 'SELECT l.nom, l.prenom, p.mois, p.montant, p.devise, p.statut FROM paiements p JOIN locataires l ON p.locataire_id = l.id WHERE 1=1'
+        params = []
+        
+        if filtre_nom:
+            query += ' AND (l.nom LIKE %s OR l.prenom LIKE %s)'
+            params.append(f'%{filtre_nom}%')
+            params.append(f'%{filtre_nom}%')
+        
+        if filtre_statut != 'Tous':
+            query += ' AND p.statut = %s'
+            params.append(filtre_statut)
+        
+        cursor.execute(query, params)
+        return cursor.fetchall()
+        
+    except Error as e:
+        messagebox.showerror('Erreur', f'Impossible de charger les données : {e}')
+        return []
+    finally:
+        if 'conn' in locals() and conn.is_connected():
+            cursor.close()
+            conn.close()
+
+def mettre_a_jour_statut(nom, prenom, mois, nouveau_statut):
+    try:
+        conn = obtenir_connexion()
+        cursor = conn.cursor()
+        
+        query = '''UPDATE paiements p 
+                   JOIN locataires l ON p.locataire_id = l.id 
+                   SET p.statut = %s 
+                   WHERE l.nom = %s AND l.prenom = %s AND p.mois = %s'''
+        cursor.execute(query, (nouveau_statut, nom, prenom, mois))
+        conn.commit()
+        return True, 'Statut mis à jour avec succès !'
+        
+    except Error as e:
+        return False, f'Erreur de mise à jour : {e}'
+    finally:
+        if 'conn' in locals() and conn.is_connected():
+            cursor.close()
+            conn.close()
+
+def ajouter_colonne_date_creation():
+    """Ajoute la colonne date_creation si elle n'existe pas"""
+    try:
+        conn = obtenir_connexion()
+        if conn.is_connected():
+            cursor = conn.cursor()
+            
+            # Vérifier si la colonne existe
+            cursor.execute("SHOW COLUMNS FROM paiements LIKE 'date_creation'")
+            if not cursor.fetchone():
+                # Ajouter la colonne avec la date actuelle comme valeur par défaut
+                cursor.execute("ALTER TABLE paiements ADD COLUMN date_creation TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+                conn.commit()
+                print("Colonne date_creation ajoutée avec succès")
+            
+            cursor.close()
+            conn.close()
+    except Error as e:
+        print(f"Erreur lors de l'ajout de la colonne: {e}")
+    finally:
+        if 'conn' in locals() and conn.is_connected():
+            conn.close()
+
+# Appeler la fonction pour s'assurer que la colonne existe
+ajouter_colonne_date_creation()
+
+def get_souscriptions_avec_filtres(filtre_nom='', filtre_statut='Tous', date_debut='', date_fin=''):
+    try:
+        conn = obtenir_connexion()
+        cursor = conn.cursor()
+        
+        query = '''SELECT l.nom, l.prenom, p.mois, p.montant, p.devise, p.statut, 
+                   DATE_FORMAT(p.date_creation, '%Y-%m-%d') as date_creation
+                   FROM paiements p 
+                   JOIN locataires l ON p.locataire_id = l.id 
+                   WHERE 1=1'''
+        params = []
+        
+        if filtre_nom:
+            query += ' AND (l.nom LIKE %s OR l.prenom LIKE %s)'
+            params.append(f'%{filtre_nom}%')
+            params.append(f'%{filtre_nom}%')
+        
+        if filtre_statut != 'Tous':
+            query += ' AND p.statut = %s'
+            params.append(filtre_statut)
+        
+        if date_debut:
+            query += ' AND DATE(p.date_creation) >= %s'
+            params.append(date_debut)
+        
+        if date_fin:
+            query += ' AND DATE(p.date_creation) <= %s'
+            params.append(date_fin)
+        
+        cursor.execute(query, params)
+        return cursor.fetchall()
+        
+    except Error as e:
+        messagebox.showerror('Erreur', f'Impossible de charger les données : {e}')
+        return []
+    finally:
+        if 'conn' in locals() and conn.is_connected():
+            cursor.close()
+            conn.close()
