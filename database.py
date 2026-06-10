@@ -1,7 +1,6 @@
 import mysql.connector
 from mysql.connector import Error
 from tkinter import messagebox
-from datetime import datetime
 
 def obtenir_connexion():
     return mysql.connector.connect(
@@ -17,7 +16,10 @@ def inserer_souscription(nom, prenom, telephone, mois, montant, devise):
         if conn.is_connected():
             cursor = conn.cursor()
             
-            cursor.execute('SELECT id FROM locataires WHERE nom = %s AND prenom = %s', (nom, prenom))
+            cursor.execute(
+                'SELECT id FROM locataires WHERE nom = %s AND prenom = %s AND telephone = %s',
+                (nom, prenom, telephone)
+            )
             result = cursor.fetchone()
             
             if result:
@@ -44,7 +46,10 @@ def get_souscriptions(filtre_nom='', filtre_statut='Tous'):
         conn = obtenir_connexion()
         cursor = conn.cursor()
         
-        query = 'SELECT l.nom, l.prenom, p.mois, p.montant, p.devise, p.statut FROM paiements p JOIN locataires l ON p.locataire_id = l.id WHERE 1=1'
+        query = (
+            'SELECT p.id, l.id, l.nom, l.prenom, p.mois, p.montant, p.devise, p.statut '
+            'FROM paiements p JOIN locataires l ON p.locataire_id = l.id WHERE 1=1'
+        )
         params = []
         
         if filtre_nom:
@@ -67,16 +72,13 @@ def get_souscriptions(filtre_nom='', filtre_statut='Tous'):
             cursor.close()
             conn.close()
 
-def mettre_a_jour_statut(nom, prenom, mois, nouveau_statut):
+def mettre_a_jour_statut(paiement_id, nouveau_statut):
     try:
         conn = obtenir_connexion()
         cursor = conn.cursor()
         
-        query = '''UPDATE paiements p 
-                   JOIN locataires l ON p.locataire_id = l.id 
-                   SET p.statut = %s 
-                   WHERE l.nom = %s AND l.prenom = %s AND p.mois = %s'''
-        cursor.execute(query, (nouveau_statut, nom, prenom, mois))
+        query = 'UPDATE paiements SET statut = %s WHERE id = %s'
+        cursor.execute(query, (nouveau_statut, paiement_id))
         conn.commit()
         return True, 'Statut mis à jour avec succès !'
         
@@ -118,11 +120,13 @@ def get_souscriptions_avec_filtres(filtre_nom='', filtre_statut='Tous', date_deb
         conn = obtenir_connexion()
         cursor = conn.cursor()
         
-        query = '''SELECT l.nom, l.prenom, p.mois, p.montant, p.devise, p.statut, 
-                   DATE_FORMAT(p.date_creation, '%Y-%m-%d') as date_creation
-                   FROM paiements p 
-                   JOIN locataires l ON p.locataire_id = l.id 
-                   WHERE 1=1'''
+        query = (
+            'SELECT p.id, l.id, l.nom, l.prenom, p.mois, p.montant, p.devise, p.statut, '
+            "DATE_FORMAT(p.date_creation, '%Y-%m-%d') as date_creation "
+            'FROM paiements p '
+            'JOIN locataires l ON p.locataire_id = l.id '
+            'WHERE 1=1'
+        )
         params = []
         
         if filtre_nom:

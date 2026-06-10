@@ -103,6 +103,7 @@ class AppGestionLoyers(ctk.CTk):
         self.state('zoomed')  # Fullscreen
         self.minsize(1100, 720)
         self._all_data: list = []   # cache des données courantes
+        self._row_meta: dict[str, dict] = {}
 
         self._build_sidebar()
         self._build_main()
@@ -433,27 +434,36 @@ class AppGestionLoyers(ctk.CTk):
 
         # Filtres côté client (devise & mois)
         if devise_filtre != "Toutes":
-            lignes = [l for l in lignes if str(l[4]).upper() == devise_filtre.upper()]
+            lignes = [l for l in lignes if str(l[6]).upper() == devise_filtre.upper()]
         if mois_filtre:
-            lignes = [l for l in lignes if mois_filtre.lower() in str(l[2]).lower()]
+            lignes = [l for l in lignes if mois_filtre.lower() in str(l[4]).lower()]
 
         self._all_data = lignes
+        self._row_meta.clear()
 
         # ── Remplir le tableau
         for row in self.tableau.get_children():
             self.tableau.delete(row)
         for i, ligne in enumerate(lignes):
+            paiement_id = ligne[0]
+            locataire_id = ligne[1]
+            valeurs_visibles = ligne[2:8]
             tag = "even" if i % 2 == 0 else "odd"
-            sv  = str(ligne[5]) if len(ligne) > 5 else ""
+            sv  = str(ligne[7]) if len(ligne) > 7 else ""
             st  = {"Payé": "paye", "Litigieux": "litige",
                    "En attente": "attente"}.get(sv, "")
-            self.tableau.insert("", "end", values=ligne, tags=(tag, st))
+            item_id = str(paiement_id)
+            self.tableau.insert("", "end", iid=item_id, values=valeurs_visibles, tags=(tag, st))
+            self._row_meta[item_id] = {
+                "paiement_id": paiement_id,
+                "locataire_id": locataire_id,
+            }
 
         # ── Stats cartes tableau
         total     = len(lignes)
-        payes     = sum(1 for l in lignes if l[5] == "Payé")
-        litigieux = sum(1 for l in lignes if l[5] == "Litigieux")
-        attente   = sum(1 for l in lignes if l[5] == "En attente")
+        payes     = sum(1 for l in lignes if l[7] == "Payé")
+        litigieux = sum(1 for l in lignes if l[7] == "Litigieux")
+        attente   = sum(1 for l in lignes if l[7] == "En attente")
         self.card_total.update(total)
         self.card_payes.update(payes)
         self.card_litigieux.update(litigieux)
@@ -470,7 +480,7 @@ class AppGestionLoyers(ctk.CTk):
         lignes = self._all_data
         
         if devise_filtre != "Toutes":
-            lignes = [l for l in lignes if str(l[4]).upper() == devise_filtre.upper()]
+            lignes = [l for l in lignes if str(l[6]).upper() == devise_filtre.upper()]
         
         self._update_dashboard(lignes)
     
@@ -484,7 +494,7 @@ class AppGestionLoyers(ctk.CTk):
         montants = []
         for l in lignes:
             try:
-                montants.append(float(str(l[3]).replace(",", ".")))
+                montants.append(float(str(l[5]).replace(",", ".")))
             except (ValueError, IndexError):
                 pass
 
@@ -494,11 +504,11 @@ class AppGestionLoyers(ctk.CTk):
         count     = len(lignes)
 
         # Mois le plus actif
-        ctr_mois  = Counter(str(l[2]) for l in lignes)
+        ctr_mois  = Counter(str(l[4]) for l in lignes)
         top_mois  = ctr_mois.most_common(1)[0] if ctr_mois else ("—", 0)
 
         # Devise dominante (pour l'étiquette du graphique)
-        ctr_dev   = Counter(str(l[4]) for l in lignes)
+        ctr_dev   = Counter(str(l[6]) for l in lignes)
         dev_label = ctr_dev.most_common(1)[0][0] if ctr_dev else ""
 
         self.kpi_montant_total.update(f"{total_m:,.0f}", dev_label)
@@ -520,7 +530,7 @@ class AppGestionLoyers(ctk.CTk):
         sums: dict = defaultdict(float)
         for l in lignes:
             try:
-                sums[str(l[2])] += float(str(l[3]).replace(",", "."))
+                sums[str(l[4])] += float(str(l[5]).replace(",", "."))
             except (ValueError, IndexError):
                 pass
 
@@ -573,7 +583,7 @@ class AppGestionLoyers(ctk.CTk):
         ax.set_facecolor(MPL["bg"])
         self._fig_pie.patch.set_facecolor(MPL["bg"])
 
-        counts = Counter(str(l[5]) for l in lignes if len(l) > 5)
+        counts = Counter(str(l[7]) for l in lignes if len(l) > 7)
         if not counts:
             ax.text(0.5, 0.5, "Aucune donnée", ha="center", va="center",
                     color=MPL["text"], fontsize=12, transform=ax.transAxes)
@@ -626,9 +636,11 @@ class AppGestionLoyers(ctk.CTk):
     def modifier_statut(self, nouveau_statut: str):
         if not hasattr(self, "selected_item"):
             return
-        vals = self.tableau.item(self.selected_item)["values"]
+        meta = self._row_meta.get(str(self.selected_item))
+        if not meta:
+            return
         success, message = database.mettre_a_jour_statut(
-            vals[0], vals[1], vals[2], nouveau_statut)
+            meta["paiement_id"], nouveau_statut)
         if success:
             messagebox.showinfo("Mise à jour", message)
             self.charger_donnees()
@@ -644,17 +656,19 @@ class AppGestionLoyers(ctk.CTk):
         values = self.tableau.item(item)["values"]
         nom = values[0]
         prenom = values[1]
+        meta = self._row_meta.get(str(item))
+        if not meta:
+            return
         
-        # Récupérer tous les paiements de ce locataire (sans date_creation pour éviter l'erreur)
+        # Récupérer tous les paiements de ce locataire
         try:
             conn = database.obtenir_connexion()
             cursor = conn.cursor()
             query = '''SELECT p.mois, p.montant, p.devise, p.statut
                       FROM paiements p
-                      JOIN locataires l ON p.locataire_id = l.id
-                      WHERE l.nom = %s AND l.prenom = %s
+                      WHERE p.locataire_id = %s
                       ORDER BY p.id DESC'''
-            cursor.execute(query, (nom, prenom))
+            cursor.execute(query, (meta["locataire_id"],))
             paiements = cursor.fetchall()
             cursor.close()
             conn.close()
