@@ -57,6 +57,42 @@ class PDFReportService:
         pdf.cell(0, 9, value, border=1, ln=True, fill=True)
 
     @classmethod
+    def _build_breakdown_by_currency(cls, lignes: List[Tuple]) -> Dict[str, Dict[str, float]]:
+        breakdown: Dict[str, Dict[str, float]] = {}
+
+        for ligne in lignes:
+            if len(ligne) < 6:
+                continue
+
+            devise = str(ligne[4]).strip().upper() or "N/A"
+            montant = cls._parse_montant(ligne[3])
+            statut = str(ligne[5]).strip()
+
+            if devise not in breakdown:
+                breakdown[devise] = {
+                    "montants_souscrits": 0.0,
+                    "montants_verses": 0.0,
+                    "en_regle": 0.0,
+                    "litigieux": 0.0,
+                }
+
+            breakdown[devise]["montants_souscrits"] += montant
+            if statut == "Payé":
+                breakdown[devise]["montants_verses"] += montant
+                breakdown[devise]["en_regle"] += 1
+            elif statut == "Litigieux":
+                breakdown[devise]["litigieux"] += 1
+
+        for devise, data in breakdown.items():
+            data["restant"] = max(data["montants_souscrits"] - data["montants_verses"], 0.0)
+
+        return breakdown
+
+    @staticmethod
+    def _format_amount(value: float, devise_suffix: str = "") -> str:
+        return f"{value:,.0f}{devise_suffix}"
+
+    @classmethod
     def generer_rapport(cls, lignes: List[Tuple], filepath: str) -> bool:
         try:
             summary = cls._build_summary(lignes)
@@ -121,6 +157,40 @@ class PDFReportService:
                 f"{summary['montant_restant']:,.0f}{devise_suffix}"
             )
             pdf.ln(10)
+
+            breakdown = cls._build_breakdown_by_currency(lignes)
+            if len(breakdown) > 1:
+                pdf.set_font('Arial', 'B', 12)
+                pdf.set_text_color(237, 242, 247)
+                pdf.cell(0, 10, 'Synthese par devise', ln=True)
+                pdf.set_font('Arial', 'B', 9)
+                pdf.set_fill_color(26, 35, 50)
+                pdf.set_text_color(255, 255, 255)
+                cols = [24, 34, 34, 34, 34, 30]
+                headers = ['Devise', 'Souscrits', 'Verses', 'En regle', 'Litigieux', 'Restant']
+                for i, h in enumerate(headers):
+                    pdf.cell(cols[i], 9, h, border=1, fill=True, align='C')
+                pdf.ln()
+
+                pdf.set_font('Arial', '', 9)
+                pdf.set_text_color(237, 242, 247)
+                for i, (devise, data) in enumerate(sorted(breakdown.items())):
+                    if pdf.get_y() > 250:
+                        pdf.add_page()
+                    r, g, b = (22, 30, 40) if i % 2 == 0 else (30, 40, 60)
+                    pdf.set_fill_color(r, g, b)
+                    row = [
+                        devise,
+                        cls._format_amount(data["montants_souscrits"]),
+                        cls._format_amount(data["montants_verses"]),
+                        str(int(data["en_regle"])),
+                        str(int(data["litigieux"])),
+                        cls._format_amount(data["restant"]),
+                    ]
+                    for j, val in enumerate(row):
+                        pdf.cell(cols[j], 9, val, border=0, fill=True, align='C')
+                    pdf.ln()
+                pdf.ln(6)
             
             # En-têtes
             pdf.set_font('Arial', 'B', 10)
