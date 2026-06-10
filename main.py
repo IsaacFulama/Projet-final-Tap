@@ -5,6 +5,7 @@ from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.ticker as mticker
 from collections import Counter, defaultdict
+import re
 import database
 from formulaire import FormulaireSouscription
 from export_pdf import ExportPDFDialog
@@ -52,6 +53,29 @@ STATUS_COLORS = {
     "Litigieux":  MPL["orange"],
     "En attente": MPL["blue"],
 }
+
+MONTH_ALIASES = {
+    "janvier": 1, "février": 2, "fevrier": 2, "mars": 3, "avril": 4,
+    "mai": 5, "juin": 6, "juillet": 7, "août": 8, "aout": 8,
+    "septembre": 9, "octobre": 10, "novembre": 11, "décembre": 12, "decembre": 12,
+}
+
+
+def _month_sort_key(value: str):
+    text = str(value).strip().lower()
+
+    match = re.match(r"^(\d{4})[-/](\d{1,2})$", text)
+    if match:
+        return int(match.group(1)), int(match.group(2)), text
+
+    match = re.match(r"^(\d{1,2})[-/](\d{4})$", text)
+    if match:
+        return int(match.group(2)), int(match.group(1)), text
+
+    parts = text.split()
+    year = next((int(part) for part in parts if part.isdigit() and len(part) == 4), 9999)
+    month = next((MONTH_ALIASES[part] for part in parts if part in MONTH_ALIASES), 99)
+    return year, month, text
 
 
 # ── Widgets réutilisables ──────────────────────────────────────────────────────
@@ -226,7 +250,7 @@ class AppGestionLoyers(ctk.CTk):
         ctk.CTkLabel(f, text="Mois contient", font=ctk.CTkFont(size=11),
                      text_color=C["text_lo"]).pack(side="left", padx=(12, 6))
         self.entry_mois_filtre = ctk.CTkEntry(
-            f, placeholder_text="ex: 2025", width=110,
+            f, placeholder_text="ex: 2026-01 ou Janvier 2026", width=180,
             fg_color=C["bg_section"], border_color=C["border"],
             text_color=C["text_hi"], placeholder_text_color=C["text_lo"])
         self.entry_mois_filtre.pack(side="left", padx=(0, 8))
@@ -498,6 +522,10 @@ class AppGestionLoyers(ctk.CTk):
             except (ValueError, IndexError):
                 pass
 
+        devises = sorted({str(l[6]).upper() for l in lignes if len(l) > 6 and str(l[6]).strip()})
+        devise_unique = devises[0] if len(devises) == 1 else ""
+        devises_multiples = len(devises) > 1
+
         total_m   = sum(montants)
         moy_m     = total_m / len(montants) if montants else 0
         max_m     = max(montants) if montants else 0
@@ -507,24 +535,38 @@ class AppGestionLoyers(ctk.CTk):
         ctr_mois  = Counter(str(l[4]) for l in lignes)
         top_mois  = ctr_mois.most_common(1)[0] if ctr_mois else ("—", 0)
 
-        # Devise dominante (pour l'étiquette du graphique)
-        ctr_dev   = Counter(str(l[6]) for l in lignes)
-        dev_label = ctr_dev.most_common(1)[0][0] if ctr_dev else ""
-
-        self.kpi_montant_total.update(f"{total_m:,.0f}", dev_label)
-        self.kpi_moyenne.update(f"{moy_m:,.0f}", dev_label)
-        self.kpi_max.update(f"{max_m:,.0f}", dev_label)
+        if devises_multiples:
+            self.kpi_montant_total.update("—", f"{len(devises)} devises")
+            self.kpi_moyenne.update("—", "Filtrer une devise")
+            self.kpi_max.update("—", "Filtrer une devise")
+        else:
+            self.kpi_montant_total.update(f"{total_m:,.0f}", devise_unique)
+            self.kpi_moyenne.update(f"{moy_m:,.0f}", devise_unique)
+            self.kpi_max.update(f"{max_m:,.0f}", devise_unique)
         self.kpi_mois_actif.update(top_mois[0], f"{top_mois[1]} paiement(s)")
         self.kpi_count.update(count, "paiements")
 
-        self._draw_bar_chart(lignes, dev_label)
+        self._draw_bar_chart(lignes, devise_unique, devises_multiples)
         self._draw_pie_chart(lignes)
 
-    def _draw_bar_chart(self, lignes: list, dev_label: str):
+    def _draw_bar_chart(self, lignes: list, dev_label: str, devises_multiples: bool):
         ax = self._ax_bar
         ax.clear()
         ax.set_facecolor(MPL["axes"])
         self._fig_bar.patch.set_facecolor(MPL["bg"])
+
+        if devises_multiples:
+            ax.text(0.5, 0.5,
+                    "Filtrez une devise pour voir les montants",
+                    ha="center", va="center",
+                    color=MPL["text"], fontsize=12, transform=ax.transAxes)
+            ax.set_xticks([])
+            ax.set_yticks([])
+            ax.spines[:].set_visible(False)
+            self._fig_bar.tight_layout(pad=0.5)
+            self._canvas_bar.draw()
+            self.lbl_devise_bar.configure(text="Devises multiples")
+            return
 
         # Agréger montants par mois
         sums: dict = defaultdict(float)
@@ -541,8 +583,8 @@ class AppGestionLoyers(ctk.CTk):
             self.lbl_devise_bar.configure(text="")
             return
 
-        # Limiter aux 10 derniers mois (ordre alphabétique/chronologique)
-        sorted_items = sorted(sums.items(), key=lambda x: x[0])[-10:]
+        # Limiter aux 10 derniers mois en ordre chronologique réel
+        sorted_items = sorted(sums.items(), key=lambda x: _month_sort_key(x[0]))[-10:]
         labels = [it[0] for it in sorted_items]
         values = [it[1] for it in sorted_items]
 
