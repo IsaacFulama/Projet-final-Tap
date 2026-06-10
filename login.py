@@ -23,6 +23,7 @@ class LoginDialog(ctk.CTk):
         super().__init__()
         self.callback_success = callback_success
         self.authenticated = False
+        self.password_visible = False
         
         self.title('TAP · Gestion des Loyers')
         self.geometry('500x450')
@@ -86,8 +87,10 @@ class LoginDialog(ctk.CTk):
         ctk.CTkLabel(form, text='Mot de passe',
                      font=ctk.CTkFont(size=11, weight='bold'),
                      text_color=C['text_hi']).pack(anchor='w', pady=(0, 6))
+        password_row = ctk.CTkFrame(form, fg_color='transparent')
+        password_row.pack(fill='x', pady=(0, 20))
         self.entry_password = ctk.CTkEntry(
-            form, placeholder_text='Entrez votre mot de passe',
+            password_row, placeholder_text='Entrez votre mot de passe',
             fg_color=C['bg_section'],
             border_color=C['border'],
             text_color=C['text_hi'],
@@ -95,8 +98,20 @@ class LoginDialog(ctk.CTk):
             show='•',
             height=40
         )
-        self.entry_password.pack(fill='x', pady=(0, 20))
+        self.entry_password.pack(side='left', fill='x', expand=True, padx=(0, 8))
         self.entry_password.bind('<Return>', lambda _: self.connexion())
+        self.btn_toggle_password = ctk.CTkButton(
+            password_row,
+            text='Afficher',
+            width=90,
+            height=40,
+            fg_color=C['bg_section'],
+            hover_color=C['border'],
+            text_color=C['text_hi'],
+            corner_radius=8,
+            command=self._toggle_password,
+        )
+        self.btn_toggle_password.pack(side='right')
         
         # Bouton de connexion
         self.btn_login = ctk.CTkButton(
@@ -115,6 +130,12 @@ class LoginDialog(ctk.CTk):
         ctk.CTkLabel(info_frame, text='🔒  Accès réservé au personnel autorisé',
                      font=ctk.CTkFont(size=10),
                      text_color=C['text_lo']).pack(pady=12)
+        self.after(100, self.entry_username.focus)
+
+    def _toggle_password(self):
+        self.password_visible = not self.password_visible
+        self.entry_password.configure(show='' if self.password_visible else '•')
+        self.btn_toggle_password.configure(text='Masquer' if self.password_visible else 'Afficher')
     
     def connexion(self):
         username = self.entry_username.get().strip()

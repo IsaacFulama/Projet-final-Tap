@@ -3,8 +3,7 @@ from fpdf import FPDF
 from tkinter import messagebox, ttk, filedialog
 import os
 
-# Import des fonctions métier (à adapter selon ton main.py)
-from main import recuperer_inventaire, inserer_souscription
+import database
 
 # Configuration de base CustomTkinter
 ctk.set_appearance_mode("Dark")
@@ -136,7 +135,7 @@ class AppGestionLoyers(ctk.CTk):
                 return
 
             # 3. Insertion
-            success, message = inserer_souscription(
+            success, message = database.inserer_souscription(
                 valeurs["Nom"], valeurs["Prénom"], valeurs["Téléphone"], 
                 valeurs["Mois"], montant_propre, valeurs["Devise"], valeurs["Statut"]
             )
@@ -159,7 +158,7 @@ class AppGestionLoyers(ctk.CTk):
             self.tree.delete(item)
         
         try:
-            donnees = recuperer_inventaire(filtre_nom=nom, filtre_statut=statut)
+            donnees = database.recuperer_inventaire(filtre_nom=nom, filtre_statut=statut)
             for row in donnees:
                 self.tree.insert("", "end", values=row)
         except Exception as e:

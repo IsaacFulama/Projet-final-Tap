@@ -1,5 +1,5 @@
 import customtkinter as ctk
-from tkinter import ttk, messagebox, Menu, filedialog
+from tkinter import ttk, messagebox, Menu, filedialog, StringVar
 from fpdf import FPDF
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -128,6 +128,14 @@ class AppGestionLoyers(ctk.CTk):
         self.minsize(1100, 720)
         self._all_data: list = []   # cache des données courantes
         self._row_meta: dict[str, dict] = {}
+        self.status_var = StringVar(value="Prêt. Connectez-vous aux données ou ajoutez un paiement.")
+        self.active_filters = {
+            "nom": "",
+            "mois": "",
+            "statut": "Tous",
+            "devise": "Toutes",
+        }
+        self.current_filter_type = "Nom"
 
         self._build_sidebar()
         self._build_main()
@@ -185,6 +193,15 @@ class AppGestionLoyers(ctk.CTk):
                      font=ctk.CTkFont(size=13), text_color=C["text_lo"]
                      ).pack(side="left", padx=(12, 0), pady=(6, 0))
 
+        self.status_bar = ctk.CTkLabel(
+            main,
+            textvariable=self.status_var,
+            anchor="w",
+            font=ctk.CTkFont(size=11),
+            text_color=C["text_lo"],
+        )
+        self.status_bar.pack(fill="x", pady=(0, 12))
+
         # ── FILTRES GLOBAUX ────────────────────────────────────────────────────
         self._build_filters(main)
 
@@ -218,54 +235,53 @@ class AppGestionLoyers(ctk.CTk):
                           border_width=1, border_color=C["border"])
         f.pack(fill="x", pady=(0, 12))
 
-        # Recherche
-        ctk.CTkLabel(f, text="🔍", text_color=C["text_lo"],
-                     font=ctk.CTkFont(size=14)).pack(side="left", padx=(16, 4), pady=12)
-        self.entry_recherche = ctk.CTkEntry(
-            f, placeholder_text="Rechercher par nom...", width=220,
-            fg_color=C["bg_section"], border_color=C["border"],
-            text_color=C["text_hi"], placeholder_text_color=C["text_lo"])
-        self.entry_recherche.pack(side="left", padx=(4, 8), pady=10)
-        self.entry_recherche.bind("<Return>", lambda _: self.charger_donnees())
+        header = ctk.CTkFrame(f, fg_color="transparent")
+        header.pack(fill="x", padx=16, pady=(12, 4))
+        ctk.CTkLabel(header, text="Filtres combinables",
+                     font=ctk.CTkFont(size=13, weight="bold"),
+                     text_color=C["text_hi"]).pack(side="left")
+        ctk.CTkLabel(header, text="Choisissez un type, ajoutez-le, puis cumulez d'autres critères.",
+                     font=ctk.CTkFont(size=10),
+                     text_color=C["text_lo"]).pack(side="left", padx=(12, 0))
 
-        self._vline(f)
+        row = ctk.CTkFrame(f, fg_color="transparent")
+        row.pack(fill="x", padx=16, pady=(6, 10))
 
-        # Statut
-        ctk.CTkLabel(f, text="Statut", font=ctk.CTkFont(size=11),
-                     text_color=C["text_lo"]).pack(side="left", padx=(12, 6))
-        self.combo_statut = self._combo(f, ["Tous", "Payé", "Litigieux", "En attente"], "Tous", 150)
-        self.combo_statut.pack(side="left", padx=(0, 8))
+        ctk.CTkLabel(row, text="Type", font=ctk.CTkFont(size=11),
+                     text_color=C["text_lo"]).pack(side="left", padx=(0, 6))
+        self.combo_type_filtre = self._combo(row, ["Nom", "Mois", "Statut", "Devise"], "Nom", 140)
+        self.combo_type_filtre.configure(command=self._on_filter_type_change)
+        self.combo_type_filtre.pack(side="left", padx=(0, 10))
 
-        self._vline(f)
+        self.filter_value_holder = ctk.CTkFrame(row, fg_color="transparent")
+        self.filter_value_holder.pack(side="left", fill="x", expand=True)
+        self._build_filter_value_widget("Nom")
 
-        # Devise
-        ctk.CTkLabel(f, text="Devise", font=ctk.CTkFont(size=11),
-                     text_color=C["text_lo"]).pack(side="left", padx=(12, 6))
-        self.combo_devise_filtre = self._combo(f, ["Toutes", "CDF", "USD", "EUR", "XAF", "CAD"], "Toutes", 120)
-        self.combo_devise_filtre.pack(side="left", padx=(0, 8))
-
-        self._vline(f)
-
-        # Mois
-        ctk.CTkLabel(f, text="Mois contient", font=ctk.CTkFont(size=11),
-                     text_color=C["text_lo"]).pack(side="left", padx=(12, 6))
-        self.entry_mois_filtre = ctk.CTkEntry(
-            f, placeholder_text="ex: 2026-01 ou Janvier 2026", width=180,
-            fg_color=C["bg_section"], border_color=C["border"],
-            text_color=C["text_hi"], placeholder_text_color=C["text_lo"])
-        self.entry_mois_filtre.pack(side="left", padx=(0, 8))
-
-        # Boutons
-        ctk.CTkButton(f, text="Filtrer", width=80, height=32,
+        ctk.CTkButton(row, text="Ajouter", width=96, height=32,
                       fg_color=C["accent"], hover_color=C["accent_dim"],
                       text_color="#000000", font=ctk.CTkFont(size=12, weight="bold"),
+                      corner_radius=6, command=self._add_or_update_filter
+                      ).pack(side="left", padx=(10, 8))
+        ctk.CTkButton(row, text="Appliquer", width=92, height=32,
+                      fg_color=C["bg_section"], hover_color=C["border"],
+                      text_color=C["text_hi"], font=ctk.CTkFont(size=12, weight="bold"),
                       corner_radius=6, command=self.charger_donnees
-                      ).pack(side="left", padx=(4, 4))
-        ctk.CTkButton(f, text="✕", width=32, height=32,
+                      ).pack(side="left", padx=(0, 8))
+        ctk.CTkButton(row, text="Tout", width=70, height=32,
                       fg_color=C["bg_section"], hover_color=C["border"],
                       text_color=C["text_lo"], corner_radius=6,
                       command=self._reset_filters
-                      ).pack(side="left", padx=(0, 12))
+                      ).pack(side="left")
+
+        chips_header = ctk.CTkFrame(f, fg_color="transparent")
+        chips_header.pack(fill="x", padx=16, pady=(0, 6))
+        ctk.CTkLabel(chips_header, text="Filtres actifs",
+                     font=ctk.CTkFont(size=11, weight="bold"),
+                     text_color=C["text_lo"]).pack(side="left")
+
+        self.active_filters_frame = ctk.CTkFrame(f, fg_color="transparent")
+        self.active_filters_frame.pack(fill="x", padx=16, pady=(0, 12))
+        self._refresh_active_filters_ui()
 
     # ── ONGLET TABLEAU ────────────────────────────────────────────────────────
     def _build_tab_table(self, parent):
@@ -292,6 +308,14 @@ class AppGestionLoyers(ctk.CTk):
                                        font=ctk.CTkFont(size=11),
                                        text_color=C["text_lo"])
         self.lbl_count.pack(side="right")
+
+        self.lbl_table_hint = ctk.CTkLabel(
+            parent,
+            text="Astuce : double-clic pour l’historique, clic droit pour changer le statut.",
+            font=ctk.CTkFont(size=10),
+            text_color=C["text_lo"],
+        )
+        self.lbl_table_hint.pack(anchor="w", padx=4, pady=(0, 6))
 
         # Treeview
         tbl_inner = ctk.CTkFrame(parent, fg_color=C["bg_section"],
@@ -331,6 +355,7 @@ class AppGestionLoyers(ctk.CTk):
                                        command=lambda: self.modifier_statut("En attente"))
         self.tableau.bind("<Button-3>", self.afficher_menu_contextuel)
         self.tableau.bind("<Double-1>", self.afficher_historique_locataire)
+        self.tableau.bind("<Return>", self.afficher_historique_locataire)
 
     # ── ONGLET DASHBOARD ──────────────────────────────────────────────────────
     def _build_tab_dashboard(self, parent):
@@ -449,18 +474,13 @@ class AppGestionLoyers(ctk.CTk):
         FormulaireSouscription(self, callback_maj_tableau=self.charger_donnees)
 
     def charger_donnees(self):
-        nom           = self.entry_recherche.get().strip()
-        statut        = self.combo_statut.get()
-        devise_filtre = self.combo_devise_filtre.get()
-        mois_filtre   = self.entry_mois_filtre.get().strip()
-
-        lignes = database.get_souscriptions(nom, statut)
-
-        # Filtres côté client (devise & mois)
-        if devise_filtre != "Toutes":
-            lignes = [l for l in lignes if str(l[6]).upper() == devise_filtre.upper()]
-        if mois_filtre:
-            lignes = [l for l in lignes if mois_filtre.lower() in str(l[4]).lower()]
+        self._set_status("Chargement des données…")
+        lignes = database.get_souscriptions(
+            self.active_filters["nom"],
+            self.active_filters["statut"],
+            self.active_filters["devise"],
+            self.active_filters["mois"],
+        )
 
         self._all_data = lignes
         self._row_meta.clear()
@@ -483,6 +503,18 @@ class AppGestionLoyers(ctk.CTk):
                 "locataire_id": locataire_id,
             }
 
+        if lignes:
+            first_item = self.tableau.get_children()[0]
+            self.tableau.selection_set(first_item)
+            self.tableau.focus(first_item)
+            self.lbl_table_hint.configure(
+                text="Astuce : double-clic pour l’historique, clic droit pour changer le statut."
+            )
+        else:
+            self.lbl_table_hint.configure(
+                text="Aucun résultat. Retirez un filtre ou cliquez sur « Tout » pour élargir la recherche."
+            )
+
         # ── Stats cartes tableau
         total     = len(lignes)
         payes     = sum(1 for l in lignes if l[7] == "Payé")
@@ -493,10 +525,14 @@ class AppGestionLoyers(ctk.CTk):
         self.card_litigieux.update(litigieux)
         self.card_attente.update(attente)
         self.lbl_count.configure(
-            text=f"{total} résultat{'s' if total != 1 else ''}")
+            text=f"{total} résultat{'s' if total != 1 else ''}" if total else "Aucun résultat")
 
         # ── Mettre à jour le dashboard si visible
         self._update_dashboard(lignes)
+        if total:
+            self._set_status(f"{total} résultat{'s' if total != 1 else ''} chargé{'s' if total != 1 else ''}.")
+        else:
+            self._set_status("Aucun résultat chargé.")
 
     def _update_dashboard_with_filter(self):
         """Met à jour le dashboard avec le filtre de devise"""
@@ -662,11 +698,17 @@ class AppGestionLoyers(ctk.CTk):
             self._update_dashboard_with_filter()
 
     def _reset_filters(self):
-        self.entry_recherche.delete(0, "end")
-        self.combo_statut.set("Tous")
-        self.combo_devise_filtre.set("Toutes")
-        self.entry_mois_filtre.delete(0, "end")
+        self.active_filters = {
+            "nom": "",
+            "mois": "",
+            "statut": "Tous",
+            "devise": "Toutes",
+        }
+        self.combo_type_filtre.set("Nom")
+        self._build_filter_value_widget("Nom")
+        self._refresh_active_filters_ui()
         self.charger_donnees()
+        self._set_status("Filtres réinitialisés.")
 
     def afficher_menu_contextuel(self, event):
         item = self.tableau.identify_row(event.y)
@@ -674,6 +716,9 @@ class AppGestionLoyers(ctk.CTk):
             self.tableau.selection_set(item)
             self.selected_item = item
             self.context_menu.post(event.x_root, event.y_root)
+            values = self.tableau.item(item).get("values", [])
+            if values:
+                self._set_status(f"Statut prêt à modifier : {values[0]} {values[1] if len(values) > 1 else ''}".strip())
 
     def modifier_statut(self, nouveau_statut: str):
         if not hasattr(self, "selected_item"):
@@ -686,12 +731,19 @@ class AppGestionLoyers(ctk.CTk):
         if success:
             messagebox.showinfo("Mise à jour", message)
             self.charger_donnees()
+            self._set_status(message)
         else:
             messagebox.showerror("Erreur", message)
+            self._set_status("La mise à jour du statut a échoué.")
 
-    def afficher_historique_locataire(self, event):
+    def afficher_historique_locataire(self, event=None):
         """Affiche l'historique des paiements d'un locataire au double-clic"""
-        item = self.tableau.identify_row(event.y)
+        item = ""
+        if event is not None and hasattr(event, "y"):
+            item = self.tableau.identify_row(event.y)
+        if not item:
+            selection = self.tableau.selection()
+            item = selection[0] if selection else ""
         if not item:
             return
         
@@ -717,9 +769,11 @@ class AppGestionLoyers(ctk.CTk):
             
             # Créer une fenêtre pour afficher l'historique
             self._show_historique_dialog(nom, prenom, paiements)
+            self._set_status(f"Historique ouvert pour {nom} {prenom}.")
             
         except Exception as e:
             messagebox.showerror("Erreur", f"Impossible de charger l'historique : {e}")
+            self._set_status("Impossible d’ouvrir l’historique.")
 
     def _show_historique_dialog(self, nom, prenom, paiements):
         """Affiche une boîte de dialogue avec l'historique des paiements"""
@@ -804,7 +858,9 @@ class AppGestionLoyers(ctk.CTk):
     def generer_pdf(self):
         # Récupérer les données actuellement affichées dans le tableau
         lignes = [self.tableau.item(c)["values"] for c in self.tableau.get_children()]
-        ExportPDFDialog(self, table_data=lignes)
+        description_filtres = self._describe_active_filters()
+        self._set_status("Préparation de l’export PDF…")
+        ExportPDFDialog(self, table_data=lignes, filter_summary=description_filtres)
 
     # ── Helpers ───────────────────────────────────────────────────────────────
     @staticmethod
@@ -824,8 +880,145 @@ class AppGestionLoyers(ctk.CTk):
         ctk.CTkFrame(parent, width=1, fg_color=C["border"]).pack(
             side="left", fill="y", pady=8)
 
+    def _on_filter_type_change(self, selected_type):
+        self.current_filter_type = selected_type
+        self._build_filter_value_widget(selected_type)
 
-if __name__ == "__main__":
+    def _build_filter_value_widget(self, filter_type):
+        for child in self.filter_value_holder.winfo_children():
+            child.destroy()
+
+        self.current_filter_type = filter_type
+
+        if filter_type == "Nom":
+            widget = ctk.CTkEntry(
+                self.filter_value_holder, placeholder_text="Ex: Dupont",
+                fg_color=C["bg_section"], border_color=C["border"],
+                text_color=C["text_hi"], placeholder_text_color=C["text_lo"])
+            widget.pack(fill="x", expand=True)
+            widget.bind("<Return>", lambda _: self._add_or_update_filter())
+            self.filter_value_widget = widget
+            return
+
+        if filter_type == "Mois":
+            widget = ctk.CTkEntry(
+                self.filter_value_holder, placeholder_text="Ex: Janvier 2026 ou 2026-01",
+                fg_color=C["bg_section"], border_color=C["border"],
+                text_color=C["text_hi"], placeholder_text_color=C["text_lo"])
+            widget.pack(fill="x", expand=True)
+            widget.bind("<Return>", lambda _: self._add_or_update_filter())
+            self.filter_value_widget = widget
+            return
+
+        if filter_type == "Statut":
+            widget = self._combo(self.filter_value_holder, ["Tous", "Payé", "Litigieux", "En attente"], "Tous", 220)
+            widget.pack(fill="x", expand=True)
+            widget.configure(command=lambda _: self._add_or_update_filter())
+            self.filter_value_widget = widget
+            return
+
+        widget = self._combo(self.filter_value_holder, ["Toutes", "CDF", "USD", "EUR", "XAF", "CAD"], "Toutes", 220)
+        widget.pack(fill="x", expand=True)
+        widget.configure(command=lambda _: self._add_or_update_filter())
+        self.filter_value_widget = widget
+
+    def _add_or_update_filter(self):
+        filter_type = self.combo_type_filtre.get()
+        value = ""
+        if hasattr(self, "filter_value_widget"):
+            value = self.filter_value_widget.get().strip()
+
+        if filter_type == "Nom":
+            self.active_filters["nom"] = value
+        elif filter_type == "Mois":
+            self.active_filters["mois"] = value
+        elif filter_type == "Statut":
+            self.active_filters["statut"] = value if value and value != "Tous" else "Tous"
+        elif filter_type == "Devise":
+            self.active_filters["devise"] = value if value and value != "Toutes" else "Toutes"
+
+        self._refresh_active_filters_ui()
+        self.charger_donnees()
+        self._set_status(f"Filtre {filter_type.lower()} appliqué.")
+
+    def _refresh_active_filters_ui(self):
+        for child in self.active_filters_frame.winfo_children():
+            child.destroy()
+
+        chips = [
+            ("Nom", self.active_filters["nom"]),
+            ("Mois", self.active_filters["mois"]),
+            ("Statut", self.active_filters["statut"]),
+            ("Devise", self.active_filters["devise"]),
+        ]
+        visible = [(label, value) for label, value in chips if value and value not in {"Tous", "Toutes"}]
+
+        if not visible:
+            ctk.CTkLabel(
+                self.active_filters_frame,
+                text="Aucun filtre actif. Choisissez un type pour commencer.",
+                font=ctk.CTkFont(size=10),
+                text_color=C["text_lo"]
+            ).pack(anchor="w")
+            return
+
+        for label, value in visible:
+            chip = ctk.CTkFrame(
+                self.active_filters_frame,
+                fg_color=C["bg_section"],
+                corner_radius=16,
+                border_width=1,
+                border_color=C["border"]
+            )
+            chip.pack(side="left", padx=(0, 8), pady=2)
+            ctk.CTkLabel(
+                chip,
+                text=f"{label}: {value}",
+                font=ctk.CTkFont(size=10, weight="bold"),
+                text_color=C["text_hi"]
+            ).pack(side="left", padx=(12, 6), pady=6)
+            ctk.CTkButton(
+                chip,
+                text="✕",
+                width=24,
+                height=24,
+                fg_color=C["border"],
+                hover_color=C["red_hover"],
+                text_color=C["text_hi"],
+                corner_radius=12,
+                command=lambda key=label.lower(): self._remove_filter(key)
+            ).pack(side="left", padx=(0, 6), pady=4)
+
+    def _remove_filter(self, key: str):
+        if key == "nom":
+            self.active_filters["nom"] = ""
+        elif key == "mois":
+            self.active_filters["mois"] = ""
+        elif key == "statut":
+            self.active_filters["statut"] = "Tous"
+        elif key == "devise":
+            self.active_filters["devise"] = "Toutes"
+        self._refresh_active_filters_ui()
+        self.charger_donnees()
+        self._set_status(f"Filtre {key} retiré.")
+
+    def _describe_active_filters(self) -> str:
+        labels = []
+        if self.active_filters["nom"]:
+            labels.append(f"Nom contient '{self.active_filters['nom']}'")
+        if self.active_filters["mois"]:
+            labels.append(f"Mois contient '{self.active_filters['mois']}'")
+        if self.active_filters["statut"] != "Tous":
+            labels.append(f"Statut = {self.active_filters['statut']}")
+        if self.active_filters["devise"] != "Toutes":
+            labels.append(f"Devise = {self.active_filters['devise']}")
+        return " | ".join(labels) if labels else "Aucun filtre actif"
+
+    def _set_status(self, message: str):
+        self.status_var.set(message)
+
+
+def launch_app():
     # Afficher le dialogue de login
     login_dialog = LoginDialog(None)
     
@@ -834,5 +1027,13 @@ if __name__ == "__main__":
     
     # Vérifier si l'authentification a réussi
     if login_dialog.authenticated:
+        try:
+            login_dialog.destroy()
+        except Exception:
+            pass
         app = AppGestionLoyers()
         app.mainloop()
+
+
+if __name__ == "__main__":
+    launch_app()

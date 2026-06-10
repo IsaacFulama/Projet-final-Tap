@@ -93,7 +93,7 @@ class PDFReportService:
         return f"{value:,.0f}{devise_suffix}"
 
     @classmethod
-    def generer_rapport(cls, lignes: List[Tuple], filepath: str) -> bool:
+    def generer_rapport(cls, lignes: List[Tuple], filepath: str, filter_summary: str = "") -> bool:
         try:
             summary = cls._build_summary(lignes)
             devises = summary["devises"]
@@ -117,45 +117,8 @@ class PDFReportService:
             pdf.set_font('Arial', '', 10)
             pdf.set_text_color(107, 124, 147)
             pdf.cell(0, 7, 'Synthese du recouvrement sur les lignes filtrees', ln=True, align='C')
-            pdf.ln(10)
-
-            pdf.set_font('Arial', 'B', 12)
-            pdf.set_text_color(237, 242, 247)
-            pdf.cell(0, 10, 'Synthese du recouvrement', ln=True)
-            pdf.set_fill_color(26, 35, 50)
-
-            devise_suffix = f" {devise_label}" if devise_label and devise_label != "MULTI-DEVISES" else ""
-            if devise_label == "MULTI-DEVISES":
-                pdf.set_font('Arial', '', 9)
-                pdf.set_text_color(107, 124, 147)
-                pdf.multi_cell(0, 6, 'Note: plusieurs devises sont presentes dans ce filtre. Les montants ci-dessous sont additionnes sur les valeurs saisies.')
-                pdf.ln(2)
-
-            cls._write_summary_row(
-                pdf,
-                'Total des montants souscrits',
-                f"{summary['montants_souscrits']:,.0f}{devise_suffix}"
-            )
-            cls._write_summary_row(
-                pdf,
-                'Total des montants effectivement verses',
-                f"{summary['montants_verses']:,.0f}{devise_suffix}"
-            )
-            cls._write_summary_row(
-                pdf,
-                'Nombre de souscripteurs en regle',
-                str(summary['souscripteurs_en_regle'])
-            )
-            cls._write_summary_row(
-                pdf,
-                'Nombre de souscripteurs litigieux',
-                str(summary['souscripteurs_litigieux'])
-            )
-            cls._write_summary_row(
-                pdf,
-                'Montant global restant a recouvrer',
-                f"{summary['montant_restant']:,.0f}{devise_suffix}"
-            )
+            if filter_summary:
+                pdf.cell(0, 7, f'Filtres actifs : {filter_summary}', ln=True, align='C')
             pdf.ln(10)
 
             breakdown = cls._build_breakdown_by_currency(lignes)
@@ -217,6 +180,48 @@ class PDFReportService:
                 for j, val in enumerate(ligne[:6]):
                     pdf.cell(col_w[j], 9, str(val), border=0, fill=True, align='C')
                 pdf.ln()
+
+            if pdf.get_y() > 210:
+                pdf.add_page()
+
+            pdf.ln(2)
+            pdf.set_font('Arial', 'B', 12)
+            pdf.set_text_color(237, 242, 247)
+            pdf.cell(0, 10, 'Recapitulatif final', ln=True)
+            pdf.set_fill_color(26, 35, 50)
+
+            devise_suffix = f" {devise_label}" if devise_label and devise_label != "MULTI-DEVISES" else ""
+            if devise_label == "MULTI-DEVISES":
+                pdf.set_font('Arial', '', 9)
+                pdf.set_text_color(107, 124, 147)
+                pdf.multi_cell(0, 6, 'Note: plusieurs devises sont presentes dans ce filtre. Les montants ci-dessous sont additionnes sur les valeurs saisies.')
+                pdf.ln(2)
+
+            cls._write_summary_row(
+                pdf,
+                'Total des montants souscrits',
+                f"{summary['montants_souscrits']:,.0f}{devise_suffix}"
+            )
+            cls._write_summary_row(
+                pdf,
+                'Total des montants effectivement verses',
+                f"{summary['montants_verses']:,.0f}{devise_suffix}"
+            )
+            cls._write_summary_row(
+                pdf,
+                'Nombre de souscripteurs en regle',
+                str(summary['souscripteurs_en_regle'])
+            )
+            cls._write_summary_row(
+                pdf,
+                'Nombre de souscripteurs litigieux',
+                str(summary['souscripteurs_litigieux'])
+            )
+            cls._write_summary_row(
+                pdf,
+                'Montant global restant a recouvrer',
+                f"{summary['montant_restant']:,.0f}{devise_suffix}"
+            )
             
             pdf.output(filepath)
             return True
@@ -225,32 +230,53 @@ class PDFReportService:
             return False
 
 class ExportPDFDialog(ctk.CTkToplevel):
-    def __init__(self, parent, table_data=None):
+    def __init__(self, parent, table_data=None, filter_summary: str = ""):
         super().__init__(parent)
         self.table_data = table_data
+        self.filter_summary = filter_summary
+        self.row_count = len(table_data or [])
         self.title('TAP · Export PDF')
-        self.geometry('400x200')
+        self.geometry('460x240')
         self.configure(fg_color=C['bg_deep'])
         
         # REMPLACEMENT CRUCIAL : 
         # Utiliser transient au lieu de grab_set() pour éviter de bloquer l'interface parente
         self.transient(parent)
         self.focus_set()
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
         
-        ctk.CTkLabel(self, text="Exporter le filtre courant ?", font=("Arial", 16)).pack(pady=28)
+        ctk.CTkLabel(self, text="Exporter le filtre courant ?", font=("Arial", 16, "bold")).pack(pady=(24, 10))
         ctk.CTkLabel(
             self,
-            text="Le rapport inclut la synthese du recouvrement et le detail filtre.",
+            text=f"{self.row_count} ligne(s) seront exportées. Le rapport inclut le détail du filtre et le récapitulatif final.",
             font=("Arial", 10),
-        ).pack(pady=(0, 12))
-        
-        ctk.CTkButton(self, text="Confirmer l'Export", command=self.exporter_pdf, 
-                      fg_color=C['accent'], text_color="black").pack(pady=10)
+            justify="center",
+        ).pack(pady=(0, 18), padx=18)
+
+        btn_row = ctk.CTkFrame(self, fg_color="transparent")
+        btn_row.pack(pady=(0, 20))
+        ctk.CTkButton(
+            btn_row,
+            text="Annuler",
+            width=120,
+            fg_color=C['bg_section'],
+            hover_color=C['border'],
+            text_color=C['text_hi'],
+            command=self.destroy,
+        ).pack(side="left", padx=(0, 10))
+        ctk.CTkButton(
+            btn_row,
+            text="Confirmer l'export",
+            width=160,
+            command=self.exporter_pdf,
+            fg_color=C['accent'],
+            text_color="black"
+        ).pack(side="left")
 
     def exporter_pdf(self):
         path = filedialog.asksaveasfilename(defaultextension='.pdf', filetypes=[("PDF files", "*.pdf")])
         if path:
-            if PDFReportService.generer_rapport(self.table_data or [], path):
+            if PDFReportService.generer_rapport(self.table_data or [], path, self.filter_summary):
                 messagebox.showinfo('Succès', 'Rapport généré avec succès.')
                 self.destroy()
             else:

@@ -10,7 +10,7 @@ def obtenir_connexion():
         password=''
     )
 
-def inserer_souscription(nom, prenom, telephone, mois, montant, devise):
+def inserer_souscription(nom, prenom, telephone, mois, montant, devise, statut='En attente'):
     try:
         conn = obtenir_connexion()
         if conn.is_connected():
@@ -28,8 +28,10 @@ def inserer_souscription(nom, prenom, telephone, mois, montant, devise):
                 cursor.execute('INSERT INTO locataires (nom, prenom, telephone) VALUES (%s, %s, %s)', (nom, prenom, telephone))
                 locataire_id = cursor.lastrowid
             
-            # Statut par défaut: En attente
-            cursor.execute('INSERT INTO paiements (locataire_id, mois, montant, devise, statut) VALUES (%s, %s, %s, %s, %s)', (locataire_id, mois, montant, devise, 'En attente'))
+            cursor.execute(
+                'INSERT INTO paiements (locataire_id, mois, montant, devise, statut) VALUES (%s, %s, %s, %s, %s)',
+                (locataire_id, mois, montant, devise, statut or 'En attente')
+            )
             
             conn.commit()
             return True, 'Enregistrement réussi avec succès !'
@@ -41,7 +43,39 @@ def inserer_souscription(nom, prenom, telephone, mois, montant, devise):
             cursor.close()
             conn.close()
 
-def get_souscriptions(filtre_nom='', filtre_statut='Tous'):
+def recuperer_inventaire(filtre_nom='', filtre_statut='Tous'):
+    try:
+        conn = obtenir_connexion()
+        cursor = conn.cursor()
+
+        query = (
+            'SELECT l.nom, l.prenom, l.telephone, p.montant, p.devise, p.mois, p.statut '
+            'FROM paiements p JOIN locataires l ON p.locataire_id = l.id WHERE 1=1'
+        )
+        params = []
+
+        if filtre_nom:
+            query += ' AND (l.nom LIKE %s OR l.prenom LIKE %s)'
+            params.append(f'%{filtre_nom}%')
+            params.append(f'%{filtre_nom}%')
+
+        if filtre_statut != 'Tous':
+            query += ' AND p.statut = %s'
+            params.append(filtre_statut)
+
+        query += ' ORDER BY p.id DESC'
+        cursor.execute(query, params)
+        return cursor.fetchall()
+
+    except Error as e:
+        messagebox.showerror('Erreur', f'Impossible de charger les données : {e}')
+        return []
+    finally:
+        if 'conn' in locals() and conn.is_connected():
+            cursor.close()
+            conn.close()
+
+def get_souscriptions(filtre_nom='', filtre_statut='Tous', filtre_devise='Toutes', filtre_mois=''):
     try:
         conn = obtenir_connexion()
         cursor = conn.cursor()
@@ -60,7 +94,15 @@ def get_souscriptions(filtre_nom='', filtre_statut='Tous'):
         if filtre_statut != 'Tous':
             query += ' AND p.statut = %s'
             params.append(filtre_statut)
-        
+
+        if filtre_devise != 'Toutes':
+            query += ' AND UPPER(TRIM(p.devise)) = %s'
+            params.append(filtre_devise.upper())
+
+        if filtre_mois:
+            query += ' AND p.mois LIKE %s'
+            params.append(f'%{filtre_mois}%')
+
         cursor.execute(query, params)
         return cursor.fetchall()
         
