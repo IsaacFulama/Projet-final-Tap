@@ -1,13 +1,58 @@
 import mysql.connector
 from mysql.connector import Error
 from tkinter import messagebox
+import json
+import os
+import sys
+from pathlib import Path
+
+
+DEFAULT_DB_CONFIG = {
+    "host": "localhost",
+    "database": "gestion_loyers",
+    "user": "root",
+    "password": "",
+}
+
+
+def _get_base_dir():
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
+def _load_db_config():
+    search_paths = [
+        _get_base_dir() / "config.json",
+        Path(getattr(sys, "_MEIPASS", "")) / "config.json" if getattr(sys, "_MEIPASS", None) else None,
+    ]
+
+    for path in search_paths:
+        if not path:
+            continue
+        try:
+            if path.exists():
+                with path.open("r", encoding="utf-8") as handle:
+                    data = json.load(handle)
+                db_data = data.get("database", {})
+                return {
+                    "host": db_data.get("host", DEFAULT_DB_CONFIG["host"]),
+                    "database": db_data.get("database", DEFAULT_DB_CONFIG["database"]),
+                    "user": db_data.get("user", DEFAULT_DB_CONFIG["user"]),
+                    "password": db_data.get("password", DEFAULT_DB_CONFIG["password"]),
+                }
+        except Exception:
+            continue
+
+    return DEFAULT_DB_CONFIG.copy()
 
 def obtenir_connexion():
+    config = _load_db_config()
     return mysql.connector.connect(
-        host='localhost',
-        database='gestion_loyers',
-        user='root',
-        password=''
+        host=config["host"],
+        database=config["database"],
+        user=config["user"],
+        password=config["password"]
     )
 
 def inserer_souscription(nom, prenom, telephone, mois, montant, devise, statut='En attente'):

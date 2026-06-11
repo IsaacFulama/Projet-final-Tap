@@ -123,9 +123,8 @@ class AppGestionLoyers(ctk.CTk):
         super().__init__()
         self.configure(fg_color=C["bg_deep"])
         self.title("TAP · Gestion des Loyers")
-        self.geometry("1340x860")
-        self.state('zoomed')  # Fullscreen
-        self.minsize(1100, 720)
+        self._set_initial_geometry()
+        self.minsize(820, 620)
         self._all_data: list = []   # cache des données courantes
         self._row_meta: dict[str, dict] = {}
         self.status_var = StringVar(value="Prêt. Connectez-vous aux données ou ajoutez un paiement.")
@@ -136,15 +135,22 @@ class AppGestionLoyers(ctk.CTk):
             "devise": "Toutes",
         }
         self.current_filter_type = "Nom"
+        self._responsive_after_id = None
+        self._current_layout_mode = None
+        self._current_chart_layout = None
+        self._current_table_card_columns = None
+        self._current_kpi_columns = None
 
         self._build_sidebar()
         self._build_main()
         self._apply_table_style()
+        self.bind("<Configure>", self._on_window_resize)
+        self.after(250, self._apply_responsive_layout)
         self.charger_donnees()
 
     # ── SIDEBAR ────────────────────────────────────────────────────────────────
     def _build_sidebar(self):
-        sb = ctk.CTkFrame(self, width=230, corner_radius=0, fg_color=C["bg_panel"])
+        sb = ctk.CTkFrame(self, width=210, corner_radius=0, fg_color=C["bg_panel"])
         sb.pack(side="left", fill="y")
         sb.pack_propagate(False)
 
@@ -285,21 +291,23 @@ class AppGestionLoyers(ctk.CTk):
 
     # ── ONGLET TABLEAU ────────────────────────────────────────────────────────
     def _build_tab_table(self, parent):
-        # Cartes stats
-        stats_row = ctk.CTkFrame(parent, fg_color="transparent")
-        stats_row.pack(fill="x", pady=(8, 12))
-        stats_row.columnconfigure((0, 1, 2, 3), weight=1, uniform="c")
+        self.tab_table_body = ctk.CTkScrollableFrame(parent, fg_color="transparent")
+        self.tab_table_body.pack(fill="both", expand=True)
 
-        self.card_total     = StatCard(stats_row, "📋", "Total",         C["blue"])
-        self.card_payes     = StatCard(stats_row, "✅", "Payés",          C["green"])
-        self.card_litigieux = StatCard(stats_row, "⚠️", "Litigieux",      C["orange"])
-        self.card_attente   = StatCard(stats_row, "⏳", "En attente",     C["text_lo"])
-        for i, c in enumerate([self.card_total, self.card_payes,
-                                self.card_litigieux, self.card_attente]):
-            c.grid(row=0, column=i, padx=(0, 10) if i < 3 else 0, sticky="nsew")
+        # Cartes stats
+        self.table_stats_row = ctk.CTkFrame(self.tab_table_body, fg_color="transparent")
+        self.table_stats_row.pack(fill="x", pady=(8, 12))
+        self.table_stats_row.columnconfigure((0, 1, 2, 3), weight=1, uniform="c")
+
+        self.card_total     = StatCard(self.table_stats_row, "📋", "Total",         C["blue"])
+        self.card_payes     = StatCard(self.table_stats_row, "✅", "Payés",          C["green"])
+        self.card_litigieux = StatCard(self.table_stats_row, "⚠️", "Litigieux",      C["orange"])
+        self.card_attente   = StatCard(self.table_stats_row, "⏳", "En attente",     C["text_lo"])
+        self.table_cards = [self.card_total, self.card_payes, self.card_litigieux, self.card_attente]
+        self._layout_table_cards(4)
 
         # Header compteur
-        tbl_hdr = ctk.CTkFrame(parent, fg_color="transparent")
+        tbl_hdr = ctk.CTkFrame(self.tab_table_body, fg_color="transparent")
         tbl_hdr.pack(fill="x", padx=4, pady=(0, 6))
         ctk.CTkLabel(tbl_hdr, text="Enregistrements",
                      font=ctk.CTkFont(size=13, weight="bold"),
@@ -310,7 +318,7 @@ class AppGestionLoyers(ctk.CTk):
         self.lbl_count.pack(side="right")
 
         self.lbl_table_hint = ctk.CTkLabel(
-            parent,
+            self.tab_table_body,
             text="Astuce : double-clic pour l’historique, clic droit pour changer le statut.",
             font=ctk.CTkFont(size=10),
             text_color=C["text_lo"],
@@ -336,12 +344,17 @@ class AppGestionLoyers(ctk.CTk):
                                 minwidth=70)
 
         sb_y = ctk.CTkScrollbar(tbl_inner, command=self.tableau.yview,
-                                  fg_color=C["bg_section"],
-                                  button_color=C["border"],
-                                  button_hover_color=C["accent_dim"])
-        self.tableau.configure(yscrollcommand=sb_y.set)
+                                fg_color=C["bg_section"],
+                                button_color=C["border"],
+                                button_hover_color=C["accent_dim"])
+        sb_x = ctk.CTkScrollbar(tbl_inner, orientation="horizontal", command=self.tableau.xview,
+                                fg_color=C["bg_section"],
+                                button_color=C["border"],
+                                button_hover_color=C["accent_dim"])
+        self.tableau.configure(yscrollcommand=sb_y.set, xscrollcommand=sb_x.set)
         sb_y.pack(side="right", fill="y", padx=(2, 4), pady=4)
-        self.tableau.pack(side="left", fill="both", expand=True, padx=4, pady=4)
+        self.tableau.pack(side="left", fill="both", expand=True, padx=4, pady=(4, 0))
+        sb_x.pack(side="bottom", fill="x", padx=4, pady=(0, 4))
 
         # Menu contextuel
         self.context_menu = Menu(self, tearoff=0, bg=C["bg_section"],
@@ -359,8 +372,11 @@ class AppGestionLoyers(ctk.CTk):
 
     # ── ONGLET DASHBOARD ──────────────────────────────────────────────────────
     def _build_tab_dashboard(self, parent):
+        self.tab_dash_body = ctk.CTkScrollableFrame(parent, fg_color="transparent")
+        self.tab_dash_body.pack(fill="both", expand=True)
+
         # Filtre devise
-        filter_row = ctk.CTkFrame(parent, fg_color="transparent")
+        filter_row = ctk.CTkFrame(self.tab_dash_body, fg_color="transparent")
         filter_row.pack(fill="x", pady=(8, 12))
         
         ctk.CTkLabel(filter_row, text="Filtrer par devise :",
@@ -385,7 +401,8 @@ class AppGestionLoyers(ctk.CTk):
                       ).pack(side="left")
         
         # KPIs financiers
-        kpi_row = ctk.CTkFrame(parent, fg_color="transparent")
+        self.kpi_row = ctk.CTkFrame(self.tab_dash_body, fg_color="transparent")
+        kpi_row = self.kpi_row
         kpi_row.pack(fill="x", pady=(8, 12))
         kpi_row.columnconfigure((0, 1, 2, 3, 4), weight=1, uniform="k")
 
@@ -394,12 +411,13 @@ class AppGestionLoyers(ctk.CTk):
         self.kpi_max           = StatCard(kpi_row, "📈", "Paiement max",     C["green"])
         self.kpi_mois_actif    = StatCard(kpi_row, "📅", "Mois le plus actif", C["orange"])
         self.kpi_count         = StatCard(kpi_row, "📊", "Total paiements", C["text_lo"])
-        for i, k in enumerate([self.kpi_montant_total, self.kpi_moyenne,
-                                self.kpi_max, self.kpi_mois_actif, self.kpi_count]):
-            k.grid(row=0, column=i, padx=(0, 10) if i < 4 else 0, sticky="nsew")
+        self.kpi_cards = [self.kpi_montant_total, self.kpi_moyenne,
+                          self.kpi_max, self.kpi_mois_actif, self.kpi_count]
+        self._layout_kpi_cards(5)
 
         # Zone graphiques (2 colonnes)
-        charts = ctk.CTkFrame(parent, fg_color="transparent")
+        self.charts = ctk.CTkFrame(self.tab_dash_body, fg_color="transparent")
+        charts = self.charts
         charts.pack(fill="both", expand=True)
         charts.columnconfigure(0, weight=3)
         charts.columnconfigure(1, weight=2)
@@ -468,6 +486,123 @@ class AppGestionLoyers(ctk.CTk):
         self.tableau.tag_configure("paye",   foreground=C["green"])
         self.tableau.tag_configure("litige", foreground=C["orange"])
         self.tableau.tag_configure("attente",foreground=C["blue"])
+
+    def _set_initial_geometry(self):
+        self.update_idletasks()
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        width = min(max(int(screen_width * 0.92), 960), screen_width)
+        height = min(max(int(screen_height * 0.9), 680), screen_height)
+        x = max((screen_width - width) // 2, 0)
+        y = max((screen_height - height) // 2, 0)
+        self.geometry(f"{width}x{height}+{x}+{y}")
+
+    def _on_window_resize(self, event):
+        if event.widget is not self:
+            return
+        if self._responsive_after_id is not None:
+            self.after_cancel(self._responsive_after_id)
+        self._responsive_after_id = self.after(100, self._apply_responsive_layout)
+
+    def _apply_responsive_layout(self):
+        self._responsive_after_id = None
+        if not hasattr(self, "frame_bar") or not hasattr(self, "kpi_cards"):
+            return
+
+        width = self.winfo_width()
+        if width <= 1:
+            return
+
+        table_columns = 4 if width >= 1450 else 2
+        kpi_columns = 5 if width >= 1550 else 3 if width >= 1180 else 2
+        chart_mode = "side" if width >= 1500 else "stacked"
+
+        self._layout_table_cards(table_columns)
+        self._layout_kpi_cards(kpi_columns)
+        self._layout_dashboard_charts(chart_mode)
+
+    def _layout_table_cards(self, columns: int):
+        if self._current_table_card_columns == columns:
+            return
+
+        for card in self.table_cards:
+            card.grid_forget()
+
+        for index in range(columns):
+            self.table_stats_row.columnconfigure(index, weight=1, uniform="c")
+        for index in range(columns, 4):
+            self.table_stats_row.columnconfigure(index, weight=0, minsize=0)
+
+        self.table_stats_row.rowconfigure(0, weight=1)
+        self.table_stats_row.rowconfigure(1, weight=1 if columns < 4 else 0)
+
+        if columns >= 4:
+            positions = [(0, index, 1) for index in range(4)]
+        else:
+            positions = [(index // 2, index % 2, 1) for index in range(4)]
+
+        for card, (row, column, columnspan) in zip(self.table_cards, positions):
+            card.grid(row=row, column=column, columnspan=columnspan, sticky="nsew",
+                      padx=(0, 10) if columnspan == 1 and column < columns - 1 else 0,
+                      pady=(0, 10) if columns < 4 else 0)
+
+        self._current_table_card_columns = columns
+
+    def _layout_kpi_cards(self, columns: int):
+        if self._current_kpi_columns == columns:
+            return
+
+        for card in self.kpi_cards:
+            card.grid_forget()
+
+        for index in range(columns):
+            self.kpi_row.columnconfigure(index, weight=1, uniform="k")
+        for index in range(columns, 5):
+            self.kpi_row.columnconfigure(index, weight=0, minsize=0)
+
+        self.kpi_row.rowconfigure(0, weight=1)
+        self.kpi_row.rowconfigure(1, weight=1 if columns < 5 else 0)
+        self.kpi_row.rowconfigure(2, weight=1 if columns == 2 else 0)
+
+        if columns >= 5:
+            positions = [(0, index, 1) for index in range(5)]
+        elif columns == 3:
+            positions = [(0, 0, 1), (0, 1, 1), (0, 2, 1), (1, 0, 1), (1, 1, 1)]
+        else:
+            positions = [(0, 0, 1), (0, 1, 1), (1, 0, 1), (1, 1, 1), (2, 0, 2)]
+
+        for card, (row, column, columnspan) in zip(self.kpi_cards, positions):
+            card.grid(row=row, column=column, columnspan=columnspan, sticky="nsew",
+                      padx=(0, 10) if columnspan == 1 and column < columns - 1 else 0,
+                      pady=(0, 10) if columns < 5 else 0)
+
+        self._current_kpi_columns = columns
+
+    def _layout_dashboard_charts(self, mode: str):
+        if self._current_chart_layout == mode:
+            return
+
+        self.frame_bar.grid_forget()
+        self.frame_pie.grid_forget()
+
+        for index in range(2):
+            self.charts.rowconfigure(index, weight=0, minsize=0)
+            self.charts.columnconfigure(index, weight=0, minsize=0)
+
+        if mode == "stacked":
+            self.charts.columnconfigure(0, weight=1)
+            self.charts.rowconfigure(0, weight=1)
+            self.charts.rowconfigure(1, weight=1)
+            self.frame_bar.grid(row=0, column=0, sticky="nsew", pady=(0, 10))
+            self.frame_pie.grid(row=1, column=0, sticky="nsew")
+        else:
+            self.charts.columnconfigure(0, weight=3)
+            self.charts.columnconfigure(1, weight=2)
+            self.charts.rowconfigure(0, weight=1)
+            self.frame_bar.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+            self.frame_pie.grid(row=0, column=1, sticky="nsew")
+
+        self._current_chart_layout = mode
 
     # ── LOGIQUE PRINCIPALE ─────────────────────────────────────────────────────
     def ouvrir_formulaire(self):
@@ -780,6 +915,8 @@ class AppGestionLoyers(ctk.CTk):
         dialog = ctk.CTkToplevel(self)
         dialog.title(f"Historique - {nom} {prenom}")
         dialog.geometry("700x500")
+        dialog.minsize(560, 400)
+        dialog.resizable(True, True)
         dialog.configure(fg_color=C["bg_deep"])
         dialog.transient(self)
         dialog.grab_set()
@@ -846,8 +983,14 @@ class AppGestionLoyers(ctk.CTk):
         
         for paiement in paiements:
             tree.insert("", "end", values=paiement)
-        
+
+        tree_scroll_x = ctk.CTkScrollbar(tbl_frame, orientation="horizontal", command=tree.xview,
+                                         fg_color=C["bg_section"],
+                                         button_color=C["border"],
+                                         button_hover_color=C["accent_dim"])
+        tree.configure(xscrollcommand=tree_scroll_x.set)
         tree.pack(fill="both", expand=True)
+        tree_scroll_x.pack(fill="x", pady=(4, 0))
         
         # Bouton fermer
         ctk.CTkButton(frame, text="Fermer", width=120, height=35,

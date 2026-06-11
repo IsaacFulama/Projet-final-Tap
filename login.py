@@ -26,9 +26,10 @@ class LoginDialog(ctk.CTk):
         self.password_visible = False
         
         self.title('TAP · Gestion des Loyers')
-        self.geometry('500x450')
+        self._set_initial_geometry()
         self.configure(fg_color=C['bg_deep'])
-        self.resizable(False, False)
+        self.resizable(True, True)
+        self.minsize(380, 340)
         
         # Centrer la fenêtre
         self.center_window()
@@ -44,6 +45,16 @@ class LoginDialog(ctk.CTk):
         height = self.winfo_height()
         x = (self.winfo_screenwidth() // 2) - (width // 2)
         y = (self.winfo_screenheight() // 2) - (height // 2)
+        self.geometry(f'{width}x{height}+{x}+{y}')
+
+    def _set_initial_geometry(self):
+        self.update_idletasks()
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        width = min(max(int(screen_width * 0.34), 420), 560)
+        height = min(max(int(screen_height * 0.55), 380), 520)
+        x = (screen_width - width) // 2
+        y = (screen_height - height) // 2
         self.geometry(f'{width}x{height}+{x}+{y}')
     
     def _build_ui(self):

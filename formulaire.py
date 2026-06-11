@@ -137,8 +137,9 @@ class FormulaireSouscription(ctk.CTkToplevel):
         self.callback_maj_tableau = callback_maj_tableau
 
         self.title('TAP · Nouveau Paiement')
-        self.geometry('560x720')
-        self.resizable(False, False)
+        self._set_initial_geometry()
+        self.resizable(True, True)
+        self.minsize(420, 480)
         self.configure(fg_color=C['bg_deep'])
 
         # Modalité correcte
@@ -152,6 +153,16 @@ class FormulaireSouscription(ctk.CTkToplevel):
 
         # Auto-focus sur le premier champ
         self.after(120, self.field_nom.focus)
+
+    def _set_initial_geometry(self):
+        self.update_idletasks()
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        width = min(max(int(screen_width * 0.42), 520), 760)
+        height = min(max(int(screen_height * 0.8), 560), 780)
+        x = (screen_width - width) // 2
+        y = (screen_height - height) // 2
+        self.geometry(f'{width}x{height}+{x}+{y}')
 
     # ── Construction UI ────────────────────────────────────────────────────────
 
@@ -174,7 +185,7 @@ class FormulaireSouscription(ctk.CTkToplevel):
         ctk.CTkFrame(card, height=1, fg_color=C['border']).pack(fill='x', padx=24)
 
         # ─ Champs ─
-        form = ctk.CTkFrame(card, fg_color='transparent')
+        form = ctk.CTkScrollableFrame(card, fg_color='transparent')
         form.pack(fill='both', expand=True, padx=24, pady=(16, 0))
 
         # Ligne 1 : Nom / Prénom

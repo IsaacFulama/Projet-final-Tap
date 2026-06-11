@@ -1,283 +1,417 @@
-import customtkinter as ctk
-from tkinter import messagebox, filedialog
-from fpdf import FPDF
+import csv
+import re
 from collections import Counter
-from typing import List, Tuple, Dict
+from datetime import datetime
+from pathlib import Path
+from tkinter import filedialog, messagebox
+from typing import Dict, Iterable, List, Sequence, Tuple
 
-# Palette de couleurs
-C = {'bg_deep': '#0B0F14', 'text_hi': '#EDF2F7', 'accent': '#C9A84C'}
+import customtkinter as ctk
+from fpdf import FPDF
+
+
+C = {
+    "bg_deep": "#0B0F14",
+    "bg_card": "#161E28",
+    "bg_section": "#1A2332",
+    "border": "#243042",
+    "accent": "#C9A84C",
+    "accent_dim": "#8A7035",
+    "text_hi": "#EDF2F7",
+    "text_lo": "#6B7C93",
+    "green": "#3ECF8E",
+    "orange": "#F59E0B",
+    "blue": "#3B82F6",
+    "red": "#EF4444",
+}
+
+
+def _safe_text(value) -> str:
+    return str(value).encode("latin-1", "replace").decode("latin-1")
+
+
+def _safe_filename_fragment(value: str) -> str:
+    fragment = re.sub(r"[^a-zA-Z0-9_-]+", "_", value.strip())
+    return fragment.strip("_") or "rapport"
+
+
+def _parse_amount(value) -> float:
+    try:
+        return float(str(value).replace(" ", "").replace(",", "."))
+    except (ValueError, TypeError):
+        return 0.0
+
+
+def _normalize_rows(rows: Iterable[Sequence]) -> List[Tuple]:
+    normalized: List[Tuple] = []
+    for row in rows:
+        values = tuple(row)
+        if len(values) < 6:
+            continue
+        normalized.append((values[0], values[1], values[2], values[3], values[4], values[5]))
+    return normalized
+
+
+def _build_summary(rows: List[Tuple]) -> Dict[str, object]:
+    montants_souscrits = 0.0
+    montants_verses = 0.0
+    souscripteurs_en_regle = 0
+    souscripteurs_litigieux = 0
+    devises = Counter()
+
+    for _, _, mois, montant, devise, statut in rows:
+        montant_float = _parse_amount(montant)
+        devise = str(devise).strip().upper() or "N/A"
+        statut = str(statut).strip()
+
+        montants_souscrits += montant_float
+        devises[devise] += 1
+
+        if statut == "Payé":
+            montants_verses += montant_float
+            souscripteurs_en_regle += 1
+        elif statut == "Litigieux":
+            souscripteurs_litigieux += 1
+
+    return {
+        "montants_souscrits": montants_souscrits,
+        "montants_verses": montants_verses,
+        "souscripteurs_en_regle": souscripteurs_en_regle,
+        "souscripteurs_litigieux": souscripteurs_litigieux,
+        "montant_restant": max(montants_souscrits - montants_verses, 0.0),
+        "devises": devises,
+    }
+
+
+def _build_breakdown(rows: List[Tuple]) -> Dict[str, Dict[str, float]]:
+    breakdown: Dict[str, Dict[str, float]] = {}
+
+    for _, _, _, montant, devise, statut in rows:
+        devise = str(devise).strip().upper() or "N/A"
+        montant_float = _parse_amount(montant)
+        statut = str(statut).strip()
+
+        if devise not in breakdown:
+            breakdown[devise] = {
+                "montants_souscrits": 0.0,
+                "montants_verses": 0.0,
+                "en_regle": 0.0,
+                "litigieux": 0.0,
+            }
+
+        breakdown[devise]["montants_souscrits"] += montant_float
+        if statut == "Payé":
+            breakdown[devise]["montants_verses"] += montant_float
+            breakdown[devise]["en_regle"] += 1
+        elif statut == "Litigieux":
+            breakdown[devise]["litigieux"] += 1
+
+    for devise, data in breakdown.items():
+        data["restant"] = max(data["montants_souscrits"] - data["montants_verses"], 0.0)
+
+    return breakdown
+
+
+def _format_amount(value: float, currency_suffix: str = "") -> str:
+    if currency_suffix:
+        return f"{value:,.0f} {currency_suffix}".strip()
+    return f"{value:,.0f}"
+
 
 class PDFReportService:
-    @staticmethod
-    def _parse_montant(valeur) -> float:
+    @classmethod
+    def generate_pdf_report(
+        cls,
+        rows: Iterable[Sequence],
+        filepath: str,
+        filter_summary: str = "",
+        title: str = "TAP - Rapport des Souscriptions",
+    ) -> bool:
+        normalized_rows = _normalize_rows(rows)
+        summary = _build_summary(normalized_rows)
+        breakdown = _build_breakdown(normalized_rows)
+
         try:
-            return float(str(valeur).replace(" ", "").replace(",", "."))
-        except (ValueError, TypeError):
-            return 0.0
+            pdf = FPDF(orientation="P", unit="mm", format="A4")
+            pdf.set_auto_page_break(auto=True, margin=16)
+            pdf.alias_nb_pages()
+            pdf.add_page()
 
-    @classmethod
-    def _build_summary(cls, lignes: List[Tuple]) -> Dict[str, object]:
-        montants_souscrits = 0.0
-        montants_verses = 0.0
-        souscripteurs_en_regle = 0
-        souscripteurs_litigieux = 0
-        devises = Counter()
+            pdf.set_fill_color(11, 15, 20)
+            pdf.rect(0, 0, 210, 297, "F")
 
-        for ligne in lignes:
-            if len(ligne) < 6:
-                continue
+            pdf.set_text_color(201, 168, 76)
+            pdf.set_font("Arial", "B", 18)
+            pdf.cell(0, 12, _safe_text(title), ln=True, align="C")
 
-            montant = cls._parse_montant(ligne[3])
-            devise = str(ligne[4]).strip().upper()
-            statut = str(ligne[5]).strip()
+            pdf.set_font("Arial", "", 10)
+            pdf.set_text_color(107, 124, 147)
+            pdf.cell(0, 6, _safe_text("Synthèse de l'export filtré"), ln=True, align="C")
+            pdf.cell(0, 6, _safe_text(datetime.now().strftime("Généré le %d/%m/%Y à %H:%M")), ln=True, align="C")
+            if filter_summary:
+                pdf.multi_cell(0, 6, _safe_text(f"Filtres actifs : {filter_summary}"), align="C")
+            pdf.ln(4)
 
-            montants_souscrits += montant
-            devises[devise] += 1
+            pdf.set_text_color(237, 242, 247)
+            pdf.set_fill_color(22, 30, 40)
+            pdf.set_font("Arial", "B", 11)
+            pdf.cell(0, 8, _safe_text("Résumé"), ln=True)
+            pdf.set_font("Arial", "", 10)
 
-            if statut == "Payé":
-                montants_verses += montant
-                souscripteurs_en_regle += 1
-            elif statut == "Litigieux":
-                souscripteurs_litigieux += 1
-
-        return {
-            "montants_souscrits": montants_souscrits,
-            "montants_verses": montants_verses,
-            "souscripteurs_en_regle": souscripteurs_en_regle,
-            "souscripteurs_litigieux": souscripteurs_litigieux,
-            "montant_restant": max(montants_souscrits - montants_verses, 0.0),
-            "devises": devises,
-        }
-
-    @staticmethod
-    def _write_summary_row(pdf: FPDF, label: str, value: str) -> None:
-        pdf.set_font('Arial', '', 10)
-        pdf.set_text_color(237, 242, 247)
-        pdf.cell(120, 9, label, border=1, fill=True)
-        pdf.cell(0, 9, value, border=1, ln=True, fill=True)
-
-    @classmethod
-    def _build_breakdown_by_currency(cls, lignes: List[Tuple]) -> Dict[str, Dict[str, float]]:
-        breakdown: Dict[str, Dict[str, float]] = {}
-
-        for ligne in lignes:
-            if len(ligne) < 6:
-                continue
-
-            devise = str(ligne[4]).strip().upper() or "N/A"
-            montant = cls._parse_montant(ligne[3])
-            statut = str(ligne[5]).strip()
-
-            if devise not in breakdown:
-                breakdown[devise] = {
-                    "montants_souscrits": 0.0,
-                    "montants_verses": 0.0,
-                    "en_regle": 0.0,
-                    "litigieux": 0.0,
-                }
-
-            breakdown[devise]["montants_souscrits"] += montant
-            if statut == "Payé":
-                breakdown[devise]["montants_verses"] += montant
-                breakdown[devise]["en_regle"] += 1
-            elif statut == "Litigieux":
-                breakdown[devise]["litigieux"] += 1
-
-        for devise, data in breakdown.items():
-            data["restant"] = max(data["montants_souscrits"] - data["montants_verses"], 0.0)
-
-        return breakdown
-
-    @staticmethod
-    def _format_amount(value: float, devise_suffix: str = "") -> str:
-        return f"{value:,.0f}{devise_suffix}"
-
-    @classmethod
-    def generer_rapport(cls, lignes: List[Tuple], filepath: str, filter_summary: str = "") -> bool:
-        try:
-            summary = cls._build_summary(lignes)
-            devises = summary["devises"]
             devise_label = ""
-            if len(devises) == 1:
-                devise_label = next(iter(devises.keys()))
-            elif len(devises) > 1:
+            if len(summary["devises"]) == 1:
+                devise_label = next(iter(summary["devises"].keys()))
+            elif len(summary["devises"]) > 1:
                 devise_label = "MULTI-DEVISES"
 
-            pdf = FPDF()
-            pdf.set_auto_page_break(auto=True, margin=15)
-            pdf.add_page()
-            # Fond sombre
-            pdf.set_fill_color(11, 15, 20)
-            pdf.rect(0, 0, 210, 297, 'F')
-            
-            # Titre
-            pdf.set_font('Arial', 'B', 20)
-            pdf.set_text_color(201, 168, 76)
-            pdf.cell(0, 16, 'TAP - Rapport des Souscriptions', ln=True, align='C')
-            pdf.set_font('Arial', '', 10)
-            pdf.set_text_color(107, 124, 147)
-            pdf.cell(0, 7, 'Synthese du recouvrement sur les lignes filtrees', ln=True, align='C')
-            if filter_summary:
-                pdf.cell(0, 7, f'Filtres actifs : {filter_summary}', ln=True, align='C')
-            pdf.ln(10)
+            devise_suffix = "" if not devise_label or devise_label == "MULTI-DEVISES" else devise_label
+            if devise_label == "MULTI-DEVISES":
+                pdf.set_font("Arial", "", 9)
+                pdf.set_text_color(107, 124, 147)
+                pdf.multi_cell(
+                    0,
+                    5,
+                    _safe_text("Plusieurs devises sont présentes dans ce filtre. Les montants restent additionnés selon les valeurs saisies."),
+                )
+                pdf.ln(1)
 
-            breakdown = cls._build_breakdown_by_currency(lignes)
-            if len(breakdown) > 1:
-                pdf.set_font('Arial', 'B', 12)
+            def summary_row(label: str, value: str) -> None:
+                pdf.set_font("Arial", "", 10)
                 pdf.set_text_color(237, 242, 247)
-                pdf.cell(0, 10, 'Synthese par devise', ln=True)
-                pdf.set_font('Arial', 'B', 9)
+                pdf.set_fill_color(26, 35, 50)
+                pdf.cell(118, 8, _safe_text(label), border=1, fill=True)
+                pdf.cell(0, 8, _safe_text(value), border=1, ln=True, fill=True)
+
+            summary_row("Total des montants souscrits", _format_amount(summary["montants_souscrits"], devise_suffix))
+            summary_row("Total des montants versés", _format_amount(summary["montants_verses"], devise_suffix))
+            summary_row("Souscripteurs en règle", str(summary["souscripteurs_en_regle"]))
+            summary_row("Souscripteurs litigieux", str(summary["souscripteurs_litigieux"]))
+            summary_row("Montant restant à recouvrer", _format_amount(summary["montant_restant"], devise_suffix))
+
+            pdf.ln(5)
+
+            if len(breakdown) > 1:
+                pdf.set_text_color(237, 242, 247)
+                pdf.set_font("Arial", "B", 11)
+                pdf.cell(0, 8, _safe_text("Synthèse par devise"), ln=True)
+                pdf.set_font("Arial", "B", 9)
                 pdf.set_fill_color(26, 35, 50)
                 pdf.set_text_color(255, 255, 255)
-                cols = [24, 34, 34, 34, 34, 30]
-                headers = ['Devise', 'Souscrits', 'Verses', 'En regle', 'Litigieux', 'Restant']
-                for i, h in enumerate(headers):
-                    pdf.cell(cols[i], 9, h, border=1, fill=True, align='C')
+                widths = [24, 34, 34, 32, 32, 34]
+                headers = ["Devise", "Souscrits", "Versés", "En règle", "Litigieux", "Restant"]
+                for width, header in zip(widths, headers):
+                    pdf.cell(width, 8, _safe_text(header), border=1, fill=True, align="C")
                 pdf.ln()
 
-                pdf.set_font('Arial', '', 9)
+                pdf.set_font("Arial", "", 9)
                 pdf.set_text_color(237, 242, 247)
-                for i, (devise, data) in enumerate(sorted(breakdown.items())):
-                    if pdf.get_y() > 250:
-                        pdf.add_page()
-                    r, g, b = (22, 30, 40) if i % 2 == 0 else (30, 40, 60)
+                for index, (devise, data) in enumerate(sorted(breakdown.items())):
+                    r, g, b = (22, 30, 40) if index % 2 == 0 else (30, 40, 60)
                     pdf.set_fill_color(r, g, b)
                     row = [
                         devise,
-                        cls._format_amount(data["montants_souscrits"]),
-                        cls._format_amount(data["montants_verses"]),
+                        _format_amount(data["montants_souscrits"]),
+                        _format_amount(data["montants_verses"]),
                         str(int(data["en_regle"])),
                         str(int(data["litigieux"])),
-                        cls._format_amount(data["restant"]),
+                        _format_amount(data["restant"]),
                     ]
-                    for j, val in enumerate(row):
-                        pdf.cell(cols[j], 9, val, border=0, fill=True, align='C')
+                    for width, value in zip(widths, row):
+                        pdf.cell(width, 8, _safe_text(value), border=0, fill=True, align="C")
                     pdf.ln()
-                pdf.ln(6)
-            
-            # En-têtes
-            pdf.set_font('Arial', 'B', 10)
-            pdf.set_text_color(255, 255, 255)
-            pdf.set_fill_color(40, 40, 60)
-            col_w = [32, 32, 38, 30, 20, 30]
-            headers = ['Nom', 'Prénom', 'Mois', 'Montant', 'Dev', 'Statut']
-            
-            for i, h in enumerate(headers):
-                pdf.cell(col_w[i], 10, h, border=1, fill=True, align='C')
-            pdf.ln()
-            
-            # Lignes
-            pdf.set_font('Arial', '', 9)
+                pdf.ln(4)
+
             pdf.set_text_color(237, 242, 247)
-            
-            for i, ligne in enumerate(lignes):
-                if pdf.get_y() > 250: pdf.add_page()
-                
-                # Alternance de couleurs
-                r, g, b = (22, 30, 40) if i % 2 == 0 else (30, 40, 60)
-                pdf.set_fill_color(r, g, b)
-                
-                for j, val in enumerate(ligne[:6]):
-                    pdf.cell(col_w[j], 9, str(val), border=0, fill=True, align='C')
+            pdf.set_font("Arial", "B", 11)
+            pdf.cell(0, 8, _safe_text("Détail des paiements"), ln=True)
+
+            widths = [34, 32, 36, 28, 20, 28]
+            headers = ["Nom", "Prénom", "Mois", "Montant", "Dev", "Statut"]
+            pdf.set_font("Arial", "B", 9)
+            pdf.set_fill_color(40, 40, 60)
+            pdf.set_text_color(255, 255, 255)
+            for width, header in zip(widths, headers):
+                pdf.cell(width, 8, _safe_text(header), border=1, fill=True, align="C")
+            pdf.ln()
+
+            pdf.set_font("Arial", "", 9)
+            pdf.set_text_color(237, 242, 247)
+            for index, row in enumerate(normalized_rows):
+                if pdf.get_y() > 260:
+                    pdf.add_page()
+                    pdf.set_fill_color(11, 15, 20)
+                    pdf.rect(0, 0, 210, 297, "F")
+                    pdf.set_font("Arial", "B", 9)
+                    pdf.set_fill_color(40, 40, 60)
+                    pdf.set_text_color(255, 255, 255)
+                    for width, header in zip(widths, headers):
+                        pdf.cell(width, 8, _safe_text(header), border=1, fill=True, align="C")
+                    pdf.ln()
+                    pdf.set_font("Arial", "", 9)
+                    pdf.set_text_color(237, 242, 247)
+
+                fill = (22, 30, 40) if index % 2 == 0 else (30, 40, 60)
+                pdf.set_fill_color(*fill)
+                values = [
+                    row[0],
+                    row[1],
+                    row[2],
+                    _format_amount(_parse_amount(row[3])),
+                    row[4],
+                    row[5],
+                ]
+                for width, value in zip(widths, values):
+                    pdf.cell(width, 8, _safe_text(value), border=0, fill=True, align="C")
                 pdf.ln()
 
-            if pdf.get_y() > 210:
-                pdf.add_page()
-
-            pdf.ln(2)
-            pdf.set_font('Arial', 'B', 12)
-            pdf.set_text_color(237, 242, 247)
-            pdf.cell(0, 10, 'Recapitulatif final', ln=True)
-            pdf.set_fill_color(26, 35, 50)
-
-            devise_suffix = f" {devise_label}" if devise_label and devise_label != "MULTI-DEVISES" else ""
-            if devise_label == "MULTI-DEVISES":
-                pdf.set_font('Arial', '', 9)
-                pdf.set_text_color(107, 124, 147)
-                pdf.multi_cell(0, 6, 'Note: plusieurs devises sont presentes dans ce filtre. Les montants ci-dessous sont additionnes sur les valeurs saisies.')
-                pdf.ln(2)
-
-            cls._write_summary_row(
-                pdf,
-                'Total des montants souscrits',
-                f"{summary['montants_souscrits']:,.0f}{devise_suffix}"
-            )
-            cls._write_summary_row(
-                pdf,
-                'Total des montants effectivement verses',
-                f"{summary['montants_verses']:,.0f}{devise_suffix}"
-            )
-            cls._write_summary_row(
-                pdf,
-                'Nombre de souscripteurs en regle',
-                str(summary['souscripteurs_en_regle'])
-            )
-            cls._write_summary_row(
-                pdf,
-                'Nombre de souscripteurs litigieux',
-                str(summary['souscripteurs_litigieux'])
-            )
-            cls._write_summary_row(
-                pdf,
-                'Montant global restant a recouvrer',
-                f"{summary['montant_restant']:,.0f}{devise_suffix}"
-            )
-            
             pdf.output(filepath)
             return True
-        except Exception as e:
-            print(f"Erreur PDF : {e}")
+        except Exception as exc:
+            print(f"Erreur PDF : {exc}")
             return False
+
+
+def export_current_view_to_pdf(
+    parent,
+    rows: Iterable[Sequence],
+    filter_summary: str = "",
+    suggested_filename: str | None = None,
+) -> bool:
+    normalized_rows = _normalize_rows(rows)
+    if not normalized_rows:
+        messagebox.showwarning("Export vide", "Aucune ligne à exporter.", parent=parent)
+        return False
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    default_name = suggested_filename or f"rapport_souscriptions_{timestamp}.pdf"
+
+    filepath = filedialog.asksaveasfilename(
+        parent=parent,
+        title="Enregistrer le rapport PDF",
+        defaultextension=".pdf",
+        initialfile=default_name,
+        filetypes=[("Fichiers PDF", "*.pdf")],
+    )
+
+    if not filepath:
+        return False
+
+    if PDFReportService.generate_pdf_report(normalized_rows, filepath, filter_summary):
+        messagebox.showinfo("Succès", f"Le rapport a été exporté vers :\n{Path(filepath).name}", parent=parent)
+        return True
+
+    messagebox.showerror("Erreur", "Impossible de générer le PDF.", parent=parent)
+    return False
+
+
+def export_current_view_to_csv(
+    parent,
+    rows: Iterable[Sequence],
+    filter_summary: str = "",
+    suggested_filename: str | None = None,
+) -> bool:
+    normalized_rows = _normalize_rows(rows)
+    if not normalized_rows:
+        messagebox.showwarning("Export vide", "Aucune ligne à exporter.", parent=parent)
+        return False
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+    default_name = suggested_filename or f"rapport_souscriptions_{timestamp}.csv"
+
+    filepath = filedialog.asksaveasfilename(
+        parent=parent,
+        title="Enregistrer le fichier CSV",
+        defaultextension=".csv",
+        initialfile=default_name,
+        filetypes=[("Fichiers CSV", "*.csv")],
+    )
+
+    if not filepath:
+        return False
+
+    try:
+        with open(filepath, "w", newline="", encoding="utf-8-sig") as handle:
+            writer = csv.writer(handle, delimiter=";")
+            writer.writerow(["Nom", "Prénom", "Mois", "Montant", "Devise", "Statut"])
+            writer.writerows(normalized_rows)
+            writer.writerow([])
+            writer.writerow(["Filtres actifs", filter_summary or "Aucun filtre actif"])
+
+        messagebox.showinfo("Succès", f"Le CSV a été exporté vers :\n{Path(filepath).name}", parent=parent)
+        return True
+    except Exception as exc:
+        messagebox.showerror("Erreur", f"Impossible de générer le CSV : {exc}", parent=parent)
+        return False
+
 
 class ExportPDFDialog(ctk.CTkToplevel):
     def __init__(self, parent, table_data=None, filter_summary: str = ""):
         super().__init__(parent)
-        self.table_data = table_data
+        self.table_data = list(table_data or [])
         self.filter_summary = filter_summary
-        self.row_count = len(table_data or [])
-        self.title('TAP · Export PDF')
-        self.geometry('460x240')
-        self.configure(fg_color=C['bg_deep'])
-        
-        # REMPLACEMENT CRUCIAL : 
-        # Utiliser transient au lieu de grab_set() pour éviter de bloquer l'interface parente
+        self.title("TAP · Export")
+        self.geometry("460x260")
+        self.minsize(380, 220)
+        self.resizable(True, True)
+        self.configure(fg_color=C["bg_deep"])
         self.transient(parent)
-        self.focus_set()
-        self.protocol("WM_DELETE_WINDOW", self.destroy)
-        
-        ctk.CTkLabel(self, text="Exporter le filtre courant ?", font=("Arial", 16, "bold")).pack(pady=(24, 10))
-        ctk.CTkLabel(
-            self,
-            text=f"{self.row_count} ligne(s) seront exportées. Le rapport inclut le détail du filtre et le récapitulatif final.",
-            font=("Arial", 10),
-            justify="center",
-        ).pack(pady=(0, 18), padx=18)
+        self.grab_set()
 
-        btn_row = ctk.CTkFrame(self, fg_color="transparent")
-        btn_row.pack(pady=(0, 20))
+        card = ctk.CTkFrame(self, fg_color=C["bg_card"], corner_radius=16,
+                            border_width=1, border_color=C["border"])
+        card.pack(fill="both", expand=True, padx=20, pady=20)
+
+        ctk.CTkLabel(card, text="Exporter les données affichées",
+                     font=ctk.CTkFont(size=18, weight="bold"),
+                     text_color=C["accent"]).pack(pady=(24, 8))
+
+        ctk.CTkLabel(card,
+                     text=f"{len(self.table_data)} ligne(s) disponibles. Choisis le format d’export.",
+                     font=ctk.CTkFont(size=11),
+                     text_color=C["text_lo"]).pack(pady=(0, 18))
+
+        btn_row = ctk.CTkFrame(card, fg_color="transparent")
+        btn_row.pack(pady=(0, 18))
+
         ctk.CTkButton(
             btn_row,
-            text="Annuler",
-            width=120,
-            fg_color=C['bg_section'],
-            hover_color=C['border'],
-            text_color=C['text_hi'],
-            command=self.destroy,
-        ).pack(side="left", padx=(0, 10))
-        ctk.CTkButton(
-            btn_row,
-            text="Confirmer l'export",
-            width=160,
+            text="Exporter PDF",
+            width=140,
+            height=38,
+            fg_color=C["accent"],
+            hover_color=C["accent_dim"],
+            text_color="#000000",
             command=self.exporter_pdf,
-            fg_color=C['accent'],
-            text_color="black"
+        ).pack(side="left", padx=(0, 10))
+
+        ctk.CTkButton(
+            btn_row,
+            text="Exporter CSV",
+            width=140,
+            height=38,
+            fg_color=C["bg_section"],
+            hover_color=C["border"],
+            text_color=C["text_hi"],
+            command=self.exporter_csv,
         ).pack(side="left")
 
+        ctk.CTkButton(
+            card,
+            text="Fermer",
+            width=120,
+            height=36,
+            fg_color="transparent",
+            border_width=1,
+            border_color=C["border"],
+            text_color=C["text_lo"],
+            hover_color=C["bg_section"],
+            command=self.destroy,
+        ).pack(pady=(0, 20))
+
     def exporter_pdf(self):
-        path = filedialog.asksaveasfilename(defaultextension='.pdf', filetypes=[("PDF files", "*.pdf")])
-        if path:
-            if PDFReportService.generer_rapport(self.table_data or [], path, self.filter_summary):
-                messagebox.showinfo('Succès', 'Rapport généré avec succès.')
-                self.destroy()
-            else:
-                messagebox.showerror('Erreur', 'Impossible de générer le fichier.')
+        if export_current_view_to_pdf(self, self.table_data, self.filter_summary):
+            self.destroy()
+
+    def exporter_csv(self):
+        if export_current_view_to_csv(self, self.table_data, self.filter_summary):
+            self.destroy()
