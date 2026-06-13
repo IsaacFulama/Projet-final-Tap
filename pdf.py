@@ -65,7 +65,7 @@ class AppGestionLoyers(ctk.CTk):
         self.entry_recherche = ctk.CTkEntry(self.filtres_frame, placeholder_text="Rechercher par Nom...", width=200)
         self.entry_recherche.pack(side="left", padx=(0, 10))
         
-        self.combo_statut = ctk.CTkComboBox(self.filtres_frame, values=["Tous", "Payé", "Litigieux"], width=150)
+        self.combo_statut = ctk.CTkComboBox(self.filtres_frame, values=["Tous", "En règle", "Litigieux"], width=150)
         self.combo_statut.pack(side="left", padx=10)
         
         self.btn_filtrer = ctk.CTkButton(self.filtres_frame, text="Filtrer", command=self.charger_donnees, width=100)
@@ -105,7 +105,7 @@ class AppGestionLoyers(ctk.CTk):
         champs = [("Nom", "entry"), ("Prénom", "entry"), ("Téléphone", "entry"), 
                   ("Mois", "entry"), ("Montant", "entry"), 
                   ("Devise", ["USD", "EUR", "XAF", "CAD"]), 
-                  ("Statut", ["Payé", "Litigieux"])]
+                  ("Statut", ["En règle", "Litigieux"])]
 
         for nom_champ, type_champ in champs:
             ctk.CTkLabel(frame, text=f"{nom_champ}:", anchor="w").pack(fill="x", pady=(5, 0))

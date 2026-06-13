@@ -33,9 +33,10 @@ CREATE TABLE locataires (
 CREATE TABLE paiements (
     id INT AUTO_INCREMENT PRIMARY KEY,
     locataire_id INT NOT NULL,
-    mois VARCHAR(50) NOT NULL,
+    mois DATE NOT NULL,
     montant DECIMAL(10, 2) NOT NULL,
     devise VARCHAR(10) NOT NULL,
+    statut_souscription VARCHAR(20) DEFAULT 'Simple',
     statut VARCHAR(20) DEFAULT 'En attente',
     date_creation TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (locataire_id) REFERENCES locataires(id)
@@ -102,13 +103,13 @@ matplotlib==3.7.1
 
 ### Enregistrement d'un paiement
 1. Cliquer sur "Nouveau Paiement"
-2. Remplir le formulaire (nom, prénom, téléphone, mois, montant, devise)
+2. Remplir le formulaire (nom, prénom, téléphone, mois au format date `AAAA-MM-JJ`, montant, devise, statut souscription)
 3. Cliquer sur "Enregistrer"
 4. Le statut est automatiquement "En attente"
 
 ### Modification du statut
 1. Clic droit sur une ligne du tableau
-2. Choisir le statut (Payé, Litigieux, En attente)
+2. Choisir le statut (En règle, Litigieux, En attente)
 
 ### Historique d'un locataire
 1. Double-clic sur une ligne du tableau
@@ -119,6 +120,11 @@ matplotlib==3.7.1
 2. Appliquer les filtres souhaités (nom, statut, mois)
 3. Cliquer sur "Exporter PDF"
 4. Choisir l'emplacement de sauvegarde
+
+### Filtre statut souscription
+1. Dans la barre de filtres, choisir "Statut souscription"
+2. Sélectionner "Spécial" ou "Simple"
+3. Ajouter le filtre pour l'appliquer au tableau
 
 ### Dashboard
 1. Cliquer sur l'onglet "Analyse"

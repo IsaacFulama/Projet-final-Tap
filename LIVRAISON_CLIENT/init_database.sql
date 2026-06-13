@@ -18,13 +18,15 @@ CREATE TABLE IF NOT EXISTS locataires (
 CREATE TABLE IF NOT EXISTS paiements (
     id INT AUTO_INCREMENT PRIMARY KEY,
     locataire_id INT NOT NULL,
-    mois VARCHAR(50) NOT NULL,
+    mois DATE NOT NULL,
     montant DECIMAL(10, 2) NOT NULL,
     devise VARCHAR(10) NOT NULL,
+    statut_souscription VARCHAR(20) DEFAULT 'Simple',
     statut VARCHAR(20) DEFAULT 'En attente',
     date_creation TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (locataire_id) REFERENCES locataires(id) ON DELETE CASCADE,
     INDEX idx_statut (statut),
+    INDEX idx_statut_souscription (statut_souscription),
     INDEX idx_mois (mois),
     INDEX idx_devise (devise)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

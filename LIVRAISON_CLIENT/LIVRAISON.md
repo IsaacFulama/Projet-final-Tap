@@ -7,6 +7,7 @@
 - `config.json` - Configuration de la base de données (à modifier selon votre environnement)
 - `INSTALLATION.md` - Guide d'installation détaillé
 - `init_database.sql` - Script d'initialisation de la base de données
+- `README_CLIENT.md` - Guide de démarrage rapide
 
 ### Documentation
 - `INSTALLATION.md` - Instructions complètes d'installation et d'utilisation
@@ -40,11 +41,12 @@
 ## Fonctionnalités principales
 
 - **Gestion des paiements** : Enregistrement des paiements de loyers
-- **Suivi des statuts** : Payé, Litigieux, En attente
+- **Suivi des statuts** : En règle, Litigieux, En attente
+- **Statut souscription** : Spécial ou Simple
 - **Historique** : Historique des paiements par locataire
 - **Export PDF** : Export filtré avec totaux par devise
 - **Dashboard** : Analyse financière avec graphiques
-- **Filtres** : Par nom, statut, devise, mois
+- **Filtres** : Par nom, statut, statut souscription, devise, mois
 - **Sécurité** : Authentification requise pour l'accès
 
 ## Support technique
@@ -60,6 +62,6 @@ Pour toute question, consulter le fichier `INSTALLATION.md` ou contacter le supp
 - **Conservez les identifiants de connexion en sécurité**
 
 ## Version
-- Version : 3.1
-- Date de livraison : Juin 2026
-- Nouveautés : Ajout de l'authentification utilisateur
+- Version : 3.2
+- Date de livraison : 12 juin 2026
+- Nouveautés : Statut de souscription (Spécial / Simple), filtres et export associés
