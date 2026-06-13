@@ -92,7 +92,7 @@ L'interface se compose de trois onglets principaux :
 **Champs obligatoires :**
 - **Nom** : Nom du locataire (ex: "Dupont")
 - **Prénom** : Prénom du locataire (ex: "Jean")
-- **Mois** : Date du paiement (format AAAA-MM-JJ, ex: "2024-01-15")
+- **Mois** : Sélectionnez le mois dans la liste déroulante (ex: "Janvier 2024")
 - **Montant total** : Montant total de la souscription (ex: "500")
 - **Devise** : Devise du paiement (CDF, USD, EUR, XAF, CAD)
 - **Type de souscription** : "Simple" ou "Spécial"
@@ -107,7 +107,10 @@ L'interface se compose de trois onglets principaux :
 - Le tableau se met à jour automatiquement
 
 ### Comportement intelligent
-- **Détection de doublons** : Si un locataire avec le même nom et prénom existe déjà (insensible à la casse), le paiement est automatiquement ajouté à ce locataire au lieu de créer un doublon
+- **Détection de doublons** : Si un locataire avec le même nom et prénom existe déjà (insensible à la casse), le paiement est automatiquement ajouté à ce locataire au lieu de créer un doublon. Par exemple :
+  - Premier enregistrement : "FULAMA ISAAC" → Création du locataire
+  - Deuxième enregistrement : "fulama isaac" → Ajout du paiement au même locataire (pas de doublon)
+  - Cela permet d'avoir un historique complet par personne
 - **Statut automatique** :
   - Si aucun montant payé → Statut "En attente"
   - Si acompte (montant payé < total) → Statut "Litigieux"

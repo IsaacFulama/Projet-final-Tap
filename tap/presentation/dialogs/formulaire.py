@@ -205,11 +205,27 @@ class FormulaireSouscription(ctk.CTkToplevel):
         row2 = ctk.CTkFrame(form, fg_color='transparent')
         row2.pack(fill='x', pady=(0, 12))
 
-        default_mois = date.today().replace(day=1).strftime('%Y-%m-%d')
-        self.field_mois = ValidatedField(row2, 'Mois (date)', 'AAAA-MM-JJ',
-                                         validator=_is_valid_month)
-        self.field_mois.entry.insert(0, default_mois)
-        self.field_mois.pack(side='left', fill='both', expand=True, padx=(0, 8))
+        # Sélecteur de mois rapide
+        col_mois = ctk.CTkFrame(row2, fg_color='transparent')
+        col_mois.pack(side='left', fill='both', expand=True, padx=(0, 8))
+        ctk.CTkLabel(col_mois, text='Mois',
+                     font=ctk.CTkFont(size=11, weight='bold'),
+                     text_color=C['text_hi']).pack(anchor='w', pady=(0, 6))
+
+        # Générer la liste des mois (année courante + année suivante)
+        mois_liste = []
+        today = date.today()
+        for annee_offset in range(2):  # Année courante et suivante
+            annee = today.year + annee_offset
+            for mois in range(1, 13):
+                mois_date = date(annee, mois, 1)
+                nom_mois = mois_date.strftime('%B %Y').capitalize()
+                valeur_mois = mois_date.strftime('%Y-%m-%d')
+                mois_liste.append(f"{nom_mois} ({valeur_mois})")
+
+        default_mois = today.replace(day=1).strftime('%B %Y (%Y-%m-%d)').capitalize()
+        self.combo_mois = self._combo(col_mois, mois_liste, default_mois)
+        self.combo_mois.pack(fill='x')
 
         self.field_montant = ValidatedField(row2, 'Montant total', '0.00',
                                             validator=_is_valid_amount)
@@ -246,7 +262,7 @@ class FormulaireSouscription(ctk.CTkToplevel):
 
         # ─ Navigation clavier : <Return> passe au champ suivant ─
         all_fields = [self.field_nom, self.field_prenom,
-                      self.field_mois, self.field_montant, self.field_montant_paye]
+                      self.field_montant, self.field_montant_paye]
         for i, f in enumerate(all_fields[:-1]):
             f.bind_return(all_fields[i + 1])
         # Dernier champ → soumettre
@@ -293,8 +309,17 @@ class FormulaireSouscription(ctk.CTkToplevel):
         # self.field_telephone.entry.delete(0, 'end')
         # self.field_telephone.entry.insert(0, telephone)
 
-        self.field_mois.entry.delete(0, 'end')
-        self.field_mois.entry.insert(0, mois)
+        # Définir le mois dans le combo
+        # Convertir la date en format du combo
+        try:
+            mois_date = date.fromisoformat(mois)
+            nom_mois = mois_date.strftime('%B %Y').capitalize()
+            valeur_mois = mois_date.strftime('%Y-%m-%d')
+            mois_combo = f"{nom_mois} ({valeur_mois})"
+            self.combo_mois.set(mois_combo)
+        except (ValueError, AttributeError):
+            # Si la conversion échoue, laisser la valeur par défaut
+            pass
 
         self.field_montant.entry.delete(0, 'end')
         self.field_montant.entry.insert(0, str(montant_total))
@@ -329,7 +354,7 @@ class FormulaireSouscription(ctk.CTkToplevel):
     def _enregistrer(self):
         # Forcer la validation de tous les champs obligatoires
         fields = [self.field_nom, self.field_prenom,
-                  self.field_mois, self.field_montant]
+                  self.field_montant]
         errors = [f for f in fields if not f.is_valid()]
 
         # Valider le téléphone seulement s'il est rempli
@@ -343,6 +368,14 @@ class FormulaireSouscription(ctk.CTkToplevel):
         if errors:
             errors[0].focus()   # amener le focus sur le premier champ en erreur
             return
+
+        # Extraire la date du combo mois
+        mois_selection = self.combo_mois.get()
+        # Format : "Janvier 2024 (2024-01-01)" → extraire "2024-01-01"
+        if '(' in mois_selection and ')' in mois_selection:
+            mois = mois_selection.split('(')[1].split(')')[0]
+        else:
+            mois = date.today().replace(day=1).strftime('%Y-%m-%d')
 
         # Récupérer le montant payé (optionnel)
         montant_paye = self.field_montant_paye.get()
@@ -359,7 +392,7 @@ class FormulaireSouscription(ctk.CTkToplevel):
                 self.field_nom.get(),
                 self.field_prenom.get(),
                 self.field_telephone.get(),
-                self.field_mois.get(),
+                mois,
                 self.field_montant.get(),
                 self.combo_devise.get(),
                 statut_souscription=self.combo_statut_souscription.get(),
@@ -370,7 +403,7 @@ class FormulaireSouscription(ctk.CTkToplevel):
                 self.field_nom.get(),
                 self.field_prenom.get(),
                 self.field_telephone.get(),
-                self.field_mois.get(),
+                mois,
                 self.field_montant.get(),
                 self.combo_devise.get(),
                 statut_souscription=self.combo_statut_souscription.get(),
