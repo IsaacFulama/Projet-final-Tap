@@ -13,7 +13,6 @@ from tap.infrastructure.database import (
     ajouter_paiement_complementaire,
     get_historique_locataire,
     get_souscriptions,
-    mettre_a_jour_statut,
     modifier_souscription,
     supprimer_souscription,
 )
@@ -784,13 +783,6 @@ class AppGestionLoyers(ctk.CTk):
         self.context_menu.add_command(label="  💰  Ajouter paiement",
                                        command=self.ajouter_paiement)
         self.context_menu.add_separator()
-        self.context_menu.add_command(label="  ✅  Marquer En règle",
-                                       command=lambda: self.modifier_statut("En règle"))
-        self.context_menu.add_command(label="  ⚠️  Marquer Litigieux",
-                                       command=lambda: self.modifier_statut("Litigieux"))
-        self.context_menu.add_command(label="  ⏳  Marquer En attente",
-                                       command=lambda: self.modifier_statut("En attente"))
-        self.context_menu.add_separator()
         self.context_menu.add_command(label="  🗑️  Supprimer",
                                        command=self.supprimer_paiement)
         self.tableau.bind("<Button-3>", self.afficher_menu_contextuel)
@@ -1107,7 +1099,7 @@ class AppGestionLoyers(ctk.CTk):
                 self.tableau.selection_set(first_item)
                 self.tableau.focus(first_item)
                 self.lbl_table_hint.configure(
-                    text="Astuce : double-clic pour l'historique, clic droit pour modifier/ajouter paiement/supprimer/changer le statut."
+                    text="Astuce : double-clic pour l'historique, clic droit pour modifier/ajouter paiement/supprimer. Le statut est automatique selon le paiement."
                 )
             else:
                 self.lbl_table_hint.configure(
@@ -1326,50 +1318,7 @@ class AppGestionLoyers(ctk.CTk):
             self.context_menu.post(event.x_root, event.y_root)
             values = self.tableau.item(item).get("values", [])
             if values:
-                self._set_status(f"Statut prêt à modifier : {values[0]} {values[1] if len(values) > 1 else ''}".strip())
-
-    def modifier_statut(self, nouveau_statut: str):
-        if not hasattr(self, "selected_item"):
-            return
-        meta = self._row_meta.get(str(self.selected_item))
-        if not meta:
-            return
-            
-        self._show_loading("Mise à jour du statut...")
-        try:
-            success, message = mettre_a_jour_statut(
-                meta["paiement_id"], nouveau_statut)
-            if success:
-                # Animation flash sur l'item modifié
-                status_colors = {
-                    "En règle": "#00cc66",
-                    "Litigieux": "#ff8800",
-                    "En attente": "#4488ff"
-                }
-                if nouveau_statut in status_colors:
-                    self.tableau.tag_configure("flash", background=status_colors[nouveau_statut])
-                    current_tags = list(self.tableau.item(self.selected_item, "tags"))
-                    current_tags.append("flash")
-                    self.tableau.item(self.selected_item, tags=tuple(current_tags))
-                    self.after(500, lambda: self._reset_item_flash(self.selected_item))
-                
-                self.charger_donnees()
-                self._set_status(f"✅ {message}")
-            else:
-                messagebox.showerror("Erreur", message)
-                self._set_status("❌ La mise à jour du statut a échoué.")
-        finally:
-            self._hide_loading()
-
-    def _reset_item_flash(self, item_id):
-        """Réinitialise l'animation flash sur un item"""
-        try:
-            if self.tableau.exists(item_id):
-                current_tags = list(self.tableau.item(item_id, "tags"))
-                current_tags = [t for t in current_tags if t != "flash"]
-                self.tableau.item(item_id, tags=tuple(current_tags))
-        except Exception:
-            pass
+                self._set_status(f"Sélectionné : {values[0]} {values[1] if len(values) > 1 else ''}".strip())
 
     def modifier_paiement(self):
         """Ouvre le formulaire de modification pour le paiement sélectionné"""

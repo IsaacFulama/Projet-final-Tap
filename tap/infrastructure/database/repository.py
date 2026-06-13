@@ -53,6 +53,14 @@ def inserer_souscription(
     else:
         statut_paiement = "En attente"
 
+    # Déterminer le statut automatiquement selon le montant payé
+    if float(montant_paye) <= 0:
+        statut = "En attente"
+    elif float(montant_paye) < float(montant):
+        statut = "Litigieux"
+    else:
+        statut = "En règle"
+
     try:
         conn = obtenir_connexion()
         if conn.is_connected():
@@ -338,6 +346,14 @@ def modifier_souscription(
             else:
                 statut_paiement = "En attente"
 
+            # Déterminer le statut automatiquement selon le montant payé
+            if float(montant_paye) <= 0:
+                statut = "En attente"
+            elif float(montant_paye) < float(montant):
+                statut = "Litigieux"
+            else:
+                statut = "En règle"
+
             # Mettre à jour le paiement
             cursor.execute(
                 "UPDATE paiements SET locataire_id = %s, mois = %s, montant = %s, montant_total = %s, montant_paye = %s, reste_a_payer = %s, devise = %s, statut = %s, statut_souscription = %s, statut_paiement = %s WHERE id = %s",
@@ -414,18 +430,26 @@ def ajouter_paiement_complementaire(paiement_id, montant_additionnel):
             # Calculer le nouveau reste à payer
             nouveau_reste = max(0, float(montant_total) - nouveau_montant_paye)
 
-            # Déterminer le nouveau statut
+            # Déterminer le nouveau statut de paiement
             if nouveau_montant_paye >= float(montant_total):
-                nouveau_statut = "Complet"
+                nouveau_statut_paiement = "Complet"
             elif nouveau_montant_paye > 0:
-                nouveau_statut = "Partiel"
+                nouveau_statut_paiement = "Partiel"
             else:
+                nouveau_statut_paiement = "En attente"
+
+            # Déterminer le statut automatiquement selon le montant payé
+            if nouveau_montant_paye <= 0:
                 nouveau_statut = "En attente"
+            elif nouveau_montant_paye < float(montant_total):
+                nouveau_statut = "Litigieux"
+            else:
+                nouveau_statut = "En règle"
 
             # Mettre à jour le paiement
             cursor.execute(
-                "UPDATE paiements SET montant_paye = %s, reste_a_payer = %s, statut_paiement = %s WHERE id = %s",
-                (nouveau_montant_paye, nouveau_reste, nouveau_statut, paiement_id),
+                "UPDATE paiements SET montant_paye = %s, reste_a_payer = %s, statut_paiement = %s, statut = %s WHERE id = %s",
+                (nouveau_montant_paye, nouveau_reste, nouveau_statut_paiement, nouveau_statut, paiement_id),
             )
 
             conn.commit()

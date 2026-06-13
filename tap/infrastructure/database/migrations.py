@@ -222,6 +222,16 @@ def ajouter_colonnes_acompte():
                     "ELSE 'En attente' "
                     "END WHERE statut_paiement IS NULL OR statut_paiement = 'En attente'"
                 )
+
+                # Mettre à jour le statut automatiquement selon le montant payé
+                cursor.execute(
+                    "UPDATE paiements SET statut = "
+                    "CASE "
+                    "WHEN montant_paye <= 0 THEN 'En attente' "
+                    "WHEN montant_paye < montant_total THEN 'Litigieux' "
+                    "ELSE 'En règle' "
+                    "END"
+                )
                 print("Colonne statut_paiement ajoutée avec succès")
 
             conn.commit()
