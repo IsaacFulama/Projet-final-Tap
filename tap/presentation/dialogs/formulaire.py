@@ -211,9 +211,14 @@ class FormulaireSouscription(ctk.CTkToplevel):
         self.field_mois.entry.insert(0, default_mois)
         self.field_mois.pack(side='left', fill='both', expand=True, padx=(0, 8))
 
-        self.field_montant = ValidatedField(row2, 'Montant', '0.00',
+        self.field_montant = ValidatedField(row2, 'Montant total', '0.00',
                                             validator=_is_valid_amount)
-        self.field_montant.pack(side='left', fill='both', expand=True, padx=(8, 0))
+        self.field_montant.pack(side='left', fill='both', expand=True, padx=(0, 8))
+
+        # Montant payé (acompte optionnel)
+        self.field_montant_paye = ValidatedField(row2, 'Montant payé (optionnel)', 'Laisser vide pour paiement complet',
+                                              validator=_is_valid_amount, required=False)
+        self.field_montant_paye.pack(side='left', fill='both', expand=True, padx=(8, 0))
 
         # Ligne 3 : Devise
         row3 = ctk.CTkFrame(form, fg_color='transparent')
@@ -241,11 +246,11 @@ class FormulaireSouscription(ctk.CTkToplevel):
 
         # ─ Navigation clavier : <Return> passe au champ suivant ─
         all_fields = [self.field_nom, self.field_prenom,
-                      self.field_telephone, self.field_mois, self.field_montant]
+                      self.field_telephone, self.field_mois, self.field_montant, self.field_montant_paye]
         for i, f in enumerate(all_fields[:-1]):
             f.bind_return(all_fields[i + 1])
         # Dernier champ → soumettre
-        self.field_montant.entry.bind('<Return>', lambda _: self._enregistrer())
+        self.field_montant_paye.entry.bind('<Return>', lambda _: self._enregistrer())
 
         # ─ Boutons ─
         ctk.CTkFrame(card, height=1, fg_color=C['border']).pack(fill='x', padx=24)
@@ -275,8 +280,8 @@ class FormulaireSouscription(ctk.CTkToplevel):
         if not self.donnees_initiales:
             return
 
-        # donnees_initiales format: (paiement_id, locataire_id, nom, prenom, mois, montant, devise, statut_souscription, statut)
-        paiement_id, locataire_id, nom, prenom, mois, montant, devise, statut_souscription, statut = self.donnees_initiales
+        # donnees_initiales format: (paiement_id, locataire_id, nom, prenom, mois, montant, devise, statut_souscription, statut, montant_total, montant_paye, reste_a_payer, statut_paiement)
+        paiement_id, locataire_id, nom, prenom, mois, montant, devise, statut_souscription, statut, montant_total, montant_paye, reste_a_payer, statut_paiement = self.donnees_initiales
 
         self.field_nom.entry.delete(0, 'end')
         self.field_nom.entry.insert(0, nom)
@@ -292,7 +297,12 @@ class FormulaireSouscription(ctk.CTkToplevel):
         self.field_mois.entry.insert(0, mois)
 
         self.field_montant.entry.delete(0, 'end')
-        self.field_montant.entry.insert(0, str(montant))
+        self.field_montant.entry.insert(0, str(montant_total))
+
+        # Montant payé (si différent du total)
+        if montant_paye and float(montant_paye) < float(montant_total):
+            self.field_montant_paye.entry.delete(0, 'end')
+            self.field_montant_paye.entry.insert(0, str(montant_paye))
 
         self.combo_devise.set(devise)
         self.combo_statut_souscription.set(statut_souscription)
@@ -317,14 +327,23 @@ class FormulaireSouscription(ctk.CTkToplevel):
     # ── Logique d'enregistrement ───────────────────────────────────────────────
 
     def _enregistrer(self):
-        # Forcer la validation de tous les champs
+        # Forcer la validation de tous les champs obligatoires
         fields = [self.field_nom, self.field_prenom,
                   self.field_telephone, self.field_mois, self.field_montant]
         errors = [f for f in fields if not f.is_valid()]
 
+        # Valider le montant payé seulement s'il est rempli
+        if self.field_montant_paye.get() and not self.field_montant_paye.is_valid():
+            errors.append(self.field_montant_paye)
+
         if errors:
             errors[0].focus()   # amener le focus sur le premier champ en erreur
             return
+
+        # Récupérer le montant payé (optionnel)
+        montant_paye = self.field_montant_paye.get()
+        if not montant_paye:
+            montant_paye = None
 
         # Désactiver le bouton le temps de l'insertion
         self.btn_save.configure(state='disabled', text='Enregistrement…')
@@ -340,6 +359,7 @@ class FormulaireSouscription(ctk.CTkToplevel):
                 self.field_montant.get(),
                 self.combo_devise.get(),
                 statut_souscription=self.combo_statut_souscription.get(),
+                montant_paye=montant_paye,
             )
         else:
             success, message = inserer_souscription(
@@ -350,6 +370,7 @@ class FormulaireSouscription(ctk.CTkToplevel):
                 self.field_montant.get(),
                 self.combo_devise.get(),
                 statut_souscription=self.combo_statut_souscription.get(),
+                montant_paye=montant_paye,
             )
 
         if success:

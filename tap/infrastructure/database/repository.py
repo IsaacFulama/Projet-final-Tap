@@ -32,10 +32,26 @@ def inserer_souscription(
     devise,
     statut="En attente",
     statut_souscription="Simple",
+    montant_paye=None,
 ):
     mois_date = parse_mois_saisie(mois)
     if not mois_date:
         return False, "Format de date invalide. Utilisez AAAA-MM-JJ ou AAAA-MM."
+
+    # Si montant_paye n'est pas spécifié, on considère que c'est un paiement complet
+    if montant_paye is None:
+        montant_paye = montant
+
+    # Calculer le reste à payer
+    reste_a_payer = max(0, float(montant) - float(montant_paye))
+
+    # Déterminer le statut de paiement
+    if float(montant_paye) >= float(montant):
+        statut_paiement = "Complet"
+    elif float(montant_paye) > 0:
+        statut_paiement = "Partiel"
+    else:
+        statut_paiement = "En attente"
 
     try:
         conn = obtenir_connexion()
@@ -58,15 +74,19 @@ def inserer_souscription(
                 locataire_id = cursor.lastrowid
 
             cursor.execute(
-                "INSERT INTO paiements (locataire_id, mois, montant, devise, statut, statut_souscription) "
-                "VALUES (%s, %s, %s, %s, %s, %s)",
+                "INSERT INTO paiements (locataire_id, mois, montant, montant_total, montant_paye, reste_a_payer, devise, statut, statut_souscription, statut_paiement) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                 (
                     locataire_id,
                     mois_date,
                     montant,
+                    montant,
+                    montant_paye,
+                    reste_a_payer,
                     devise,
                     statut or "En attente",
                     statut_souscription or "Simple",
+                    statut_paiement,
                 ),
             )
 
@@ -127,7 +147,7 @@ def get_souscriptions(
 
         query = (
             f"SELECT p.id, l.id, l.nom, l.prenom, {MOIS_SQL_EXPR} AS mois, p.montant, p.devise, "
-            "p.statut_souscription, p.statut "
+            "p.statut_souscription, p.statut, p.montant_total, p.montant_paye, p.reste_a_payer, p.statut_paiement "
             "FROM paiements p JOIN locataires l ON p.locataire_id = l.id WHERE 1=1"
         )
         params = []
@@ -241,7 +261,8 @@ def get_historique_locataire(locataire_id):
     cursor = conn.cursor()
     try:
         query = (
-            f"SELECT {MOIS_SQL_EXPR} AS mois, p.montant, p.devise, p.statut_souscription, p.statut "
+            f"SELECT {MOIS_SQL_EXPR} AS mois, p.montant, p.devise, p.statut_souscription, p.statut, "
+            "p.montant_total, p.montant_paye, p.reste_a_payer, p.statut_paiement "
             "FROM paiements p "
             "WHERE p.locataire_id = %s "
             "ORDER BY p.mois DESC, p.id DESC"
@@ -263,6 +284,7 @@ def modifier_souscription(
     devise,
     statut="En attente",
     statut_souscription="Simple",
+    montant_paye=None,
 ):
     """Modifie une souscription existante."""
     mois_date = parse_mois_saisie(mois)
@@ -301,16 +323,35 @@ def modifier_souscription(
                 )
                 new_locataire_id = cursor.lastrowid
 
+            # Si montant_paye n'est pas spécifié, on considère que c'est un paiement complet
+            if montant_paye is None:
+                montant_paye = montant
+
+            # Calculer le reste à payer
+            reste_a_payer = max(0, float(montant) - float(montant_paye))
+
+            # Déterminer le statut de paiement
+            if float(montant_paye) >= float(montant):
+                statut_paiement = "Complet"
+            elif float(montant_paye) > 0:
+                statut_paiement = "Partiel"
+            else:
+                statut_paiement = "En attente"
+
             # Mettre à jour le paiement
             cursor.execute(
-                "UPDATE paiements SET locataire_id = %s, mois = %s, montant = %s, devise = %s, statut = %s, statut_souscription = %s WHERE id = %s",
+                "UPDATE paiements SET locataire_id = %s, mois = %s, montant = %s, montant_total = %s, montant_paye = %s, reste_a_payer = %s, devise = %s, statut = %s, statut_souscription = %s, statut_paiement = %s WHERE id = %s",
                 (
                     new_locataire_id,
                     mois_date,
                     montant,
+                    montant,
+                    montant_paye,
+                    reste_a_payer,
                     devise,
                     statut or "En attente",
                     statut_souscription or "Simple",
+                    statut_paiement,
                     paiement_id,
                 ),
             )
@@ -340,6 +381,55 @@ def supprimer_souscription(paiement_id):
 
             conn.commit()
             return True, "Suppression réussie avec succès !"
+
+    except Error as e:
+        return False, f"Erreur de base de données : {e}"
+    finally:
+        if "conn" in locals() and conn.is_connected():
+            cursor.close()
+            conn.close()
+
+
+def ajouter_paiement_complementaire(paiement_id, montant_additionnel):
+    """Ajoute un paiement complémentaire à un paiement existant."""
+    try:
+        conn = obtenir_connexion()
+        if conn.is_connected():
+            cursor = conn.cursor()
+
+            # Récupérer les informations actuelles
+            cursor.execute(
+                "SELECT montant_total, montant_paye FROM paiements WHERE id = %s",
+                (paiement_id,),
+            )
+            result = cursor.fetchone()
+            if not result:
+                return False, "Paiement non trouvé."
+
+            montant_total, montant_paye_actuel = result
+
+            # Calculer le nouveau montant payé
+            nouveau_montant_paye = float(montant_paye_actuel) + float(montant_additionnel)
+
+            # Calculer le nouveau reste à payer
+            nouveau_reste = max(0, float(montant_total) - nouveau_montant_paye)
+
+            # Déterminer le nouveau statut
+            if nouveau_montant_paye >= float(montant_total):
+                nouveau_statut = "Complet"
+            elif nouveau_montant_paye > 0:
+                nouveau_statut = "Partiel"
+            else:
+                nouveau_statut = "En attente"
+
+            # Mettre à jour le paiement
+            cursor.execute(
+                "UPDATE paiements SET montant_paye = %s, reste_a_payer = %s, statut_paiement = %s WHERE id = %s",
+                (nouveau_montant_paye, nouveau_reste, nouveau_statut, paiement_id),
+            )
+
+            conn.commit()
+            return True, f"Paiement complémentaire de {montant_additionnel} ajouté avec succès ! Nouveau montant payé : {nouveau_montant_paye}"
 
     except Error as e:
         return False, f"Erreur de base de données : {e}"

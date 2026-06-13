@@ -10,6 +10,7 @@ import csv
 from tap.config.theme import C, MPL, STATUS_COLORS
 from tap.core.utils import month_sort_key
 from tap.infrastructure.database import (
+    ajouter_paiement_complementaire,
     get_historique_locataire,
     get_souscriptions,
     mettre_a_jour_statut,
@@ -191,18 +192,27 @@ class HistoriqueDialog(ctk.CTkToplevel):
         """Met à jour les statistiques"""
         for widget in self.stats_frame.winfo_children():
             widget.destroy()
-            
+
         stats_row = ctk.CTkFrame(self.stats_frame, fg_color="transparent")
         stats_row.pack(fill="x", padx=16, pady=12)
-        
+
         total_montant = 0
+        total_paye = 0
+        total_reste = 0
         payes = 0
         litigieux = 0
         attente = 0
-        
+        complets = 0
+        partiels = 0
+
         for p in self.paiements:
             try:
-                total_montant += float(str(p[1]).replace(",", "."))
+                if len(p) >= 9:
+                    total_montant += float(str(p[5]).replace(",", "."))
+                    total_paye += float(str(p[6]).replace(",", "."))
+                    total_reste += float(str(p[7]).replace(",", "."))
+                else:
+                    total_montant += float(str(p[1]).replace(",", "."))
             except (ValueError, IndexError):
                 pass
             if len(p) > 4:
@@ -212,11 +222,19 @@ class HistoriqueDialog(ctk.CTkToplevel):
                     litigieux += 1
                 elif p[4] == "En attente":
                     attente += 1
-        
+            if len(p) > 8:
+                if p[8] == "Complet":
+                    complets += 1
+                elif p[8] == "Partiel":
+                    partiels += 1
+
         self._stat_label(stats_row, f"Total: {len(self.paiements)}", C["text_hi"])
         self._stat_label(stats_row, f"En règle: {payes}", C["green"])
         self._stat_label(stats_row, f"Litigieux: {litigieux}", C["orange"])
-        self._stat_label(stats_row, f"Total: {total_montant:,.0f}", C["accent"])
+        self._stat_label(stats_row, f"Complet: {complets}", C["green"])
+        self._stat_label(stats_row, f"Partiel: {partiels}", C["orange"])
+        self._stat_label(stats_row, f"Total payé: {total_paye:,.0f}", C["accent"])
+        self._stat_label(stats_row, f"Reste: {total_reste:,.0f}", C["red"])
         
     @staticmethod
     def _stat_label(parent, text, color):
@@ -227,30 +245,42 @@ class HistoriqueDialog(ctk.CTkToplevel):
         
     def _build_table(self):
         """Construit le tableau des paiements"""
-        cols = ("Mois", "Montant", "Devise", "Statut Souscription", "Statut")
-        self.tree = ttk.Treeview(self.tbl_frame, columns=cols, 
+        cols = ("Mois", "Montant Total", "Montant Payé", "Reste", "Devise", "Statut Souscription", "Statut", "Statut Paiement")
+        self.tree = ttk.Treeview(self.tbl_frame, columns=cols,
                                  show="headings", style="TAP.Treeview")
-        
-        widths = {"Mois": 120, "Montant": 110, "Devise": 90, 
-                  "Statut Souscription": 160, "Statut": 120}
-        
+
+        widths = {"Mois": 100, "Montant Total": 100, "Montant Payé": 100, "Reste": 90,
+                  "Devise": 70, "Statut Souscription": 130, "Statut": 100, "Statut Paiement": 100}
+
         for col in cols:
             self.tree.heading(
                 col, text=col.upper(),
                 command=lambda c=col: self._sort_by_column(c)
             )
-            self.tree.column(col, width=widths.get(col, 100), 
-                           anchor="e" if col == "Montant" else "center",
-                           minwidth=70)
-        
+            self.tree.column(col, width=widths.get(col, 100),
+                           anchor="e" if "Montant" in col or col == "Reste" else "center",
+                           minwidth=60)
+
         # Remplir
         for i, paiement in enumerate(self.paiements):
             tag = "even" if i % 2 == 0 else "odd"
             st = str(paiement[4]) if len(paiement) > 4 else ""
             status_tag = {"En règle": "paye", "Litigieux": "litige",
                          "En attente": "attente"}.get(st, "")
-            self.tree.insert("", "end", values=paiement, tags=(tag, status_tag))
-        
+
+            # Statut paiement tag
+            statut_paiement = str(paiement[8]) if len(paiement) > 8 else "Complet"
+            paiement_tag = {"Complet": "complet", "Partiel": "partiel", "En attente": "attente_paiement"}.get(statut_paiement, "")
+
+            # N'afficher que les colonnes nécessaires
+            if len(paiement) >= 9:
+                values = (paiement[0], paiement[5], paiement[6], paiement[7], paiement[2], paiement[3], paiement[4], paiement[8])
+            else:
+                # Fallback pour les anciennes données
+                values = (paiement[0], paiement[1], paiement[1], 0, paiement[2], paiement[3], paiement[4], "Complet")
+
+            self.tree.insert("", "end", values=values, tags=(tag, status_tag, paiement_tag))
+
         # Scrollbar
         scrollbar = ctk.CTkScrollbar(
             self.tbl_frame, command=self.tree.yview,
@@ -258,10 +288,10 @@ class HistoriqueDialog(ctk.CTkToplevel):
             button_hover_color=C["accent_dim"]
         )
         self.tree.configure(yscrollcommand=scrollbar.set)
-        
+
         self.tree.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
-        
+
         # Appliquer les tags
         self._apply_tree_tags()
         
@@ -272,6 +302,9 @@ class HistoriqueDialog(ctk.CTkToplevel):
         self.tree.tag_configure("paye", foreground=C["green"])
         self.tree.tag_configure("litige", foreground=C["orange"])
         self.tree.tag_configure("attente", foreground=C["blue"])
+        self.tree.tag_configure("complet", foreground=C["green"])
+        self.tree.tag_configure("partiel", foreground=C["orange"])
+        self.tree.tag_configure("attente_paiement", foreground=C["text_lo"])
         
     def _sort_by_column(self, column):
         """Trie le tableau par colonne"""
@@ -314,21 +347,27 @@ class HistoriqueDialog(ctk.CTkToplevel):
             filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
             initialfile=f"historique_{self.nom}_{self.prenom}.csv"
         )
-        
+
         if not filename:
             return
-            
+
         try:
             with open(filename, 'w', newline='', encoding='utf-8-sig') as f:
                 writer = csv.writer(f)
-                writer.writerow(["Mois", "Montant", "Devise", 
-                               "Statut Souscription", "Statut"])
-                writer.writerows(self.paiements)
-            
-            messagebox.showinfo("Export réussi", 
+                writer.writerow(["Mois", "Montant Total", "Montant Payé", "Reste à Payer", "Devise",
+                               "Statut Souscription", "Statut", "Statut Paiement"])
+                # Adapter les données pour l'export
+                for p in self.paiements:
+                    if len(p) >= 9:
+                        row = [p[0], p[5], p[6], p[7], p[2], p[3], p[4], p[8]]
+                    else:
+                        row = [p[0], p[1], p[1], 0, p[2], p[3], p[4], "Complet"]
+                    writer.writerow(row)
+
+            messagebox.showinfo("Export réussi",
                               f"Fichier sauvegardé :\n{filename}")
         except Exception as e:
-            messagebox.showerror("Erreur d'export", 
+            messagebox.showerror("Erreur d'export",
                                f"Impossible d'exporter : {str(e)}")
     
     def _show_evolution_chart(self):
@@ -742,6 +781,8 @@ class AppGestionLoyers(ctk.CTk):
                                   activeforeground=C["accent"], bd=0)
         self.context_menu.add_command(label="  ✏️  Modifier",
                                        command=self.modifier_paiement)
+        self.context_menu.add_command(label="  💰  Ajouter paiement",
+                                       command=self.ajouter_paiement)
         self.context_menu.add_separator()
         self.context_menu.add_command(label="  ✅  Marquer En règle",
                                        command=lambda: self.modifier_statut("En règle"))
@@ -1054,6 +1095,10 @@ class AppGestionLoyers(ctk.CTk):
                         "devise": ligne[6],
                         "statut_souscription": ligne[7],
                         "statut": ligne[8],
+                        "montant_total": ligne[9] if len(ligne) > 9 else ligne[5],
+                        "montant_paye": ligne[10] if len(ligne) > 10 else ligne[5],
+                        "reste_a_payer": ligne[11] if len(ligne) > 11 else 0,
+                        "statut_paiement": ligne[12] if len(ligne) > 12 else "Complet",
                     }
                 self.update_idletasks()
 
@@ -1062,7 +1107,7 @@ class AppGestionLoyers(ctk.CTk):
                 self.tableau.selection_set(first_item)
                 self.tableau.focus(first_item)
                 self.lbl_table_hint.configure(
-                    text="Astuce : double-clic pour l'historique, clic droit pour modifier/supprimer/changer le statut."
+                    text="Astuce : double-clic pour l'historique, clic droit pour modifier/ajouter paiement/supprimer/changer le statut."
                 )
             else:
                 self.lbl_table_hint.configure(
@@ -1348,7 +1393,11 @@ class AppGestionLoyers(ctk.CTk):
             meta["montant"],
             meta["devise"],
             meta["statut_souscription"],
-            meta["statut"]
+            meta["statut"],
+            meta.get("montant_total", meta["montant"]),
+            meta.get("montant_paye", meta["montant"]),
+            meta.get("reste_a_payer", 0),
+            meta.get("statut_paiement", "Complet"),
         )
 
         # Ouvrir le formulaire en mode édition
@@ -1386,6 +1435,56 @@ class AppGestionLoyers(ctk.CTk):
                 else:
                     messagebox.showerror("Erreur", message)
                     self._set_status("❌ La suppression a échoué.")
+            finally:
+                self._hide_loading()
+
+    def ajouter_paiement(self):
+        """Ajoute un paiement complémentaire au paiement sélectionné"""
+        if not hasattr(self, "selected_item"):
+            messagebox.showwarning("Avertissement", "Veuillez sélectionner un paiement.")
+            return
+
+        meta = self._row_meta.get(str(self.selected_item))
+        if not meta:
+            messagebox.showerror("Erreur", "Impossible de trouver les données du paiement.")
+            return
+
+        paiement_id = meta["paiement_id"]
+        nom = meta["nom"]
+        prenom = meta["prenom"]
+        mois = meta["mois"]
+        montant_total = meta.get("montant_total", meta["montant"])
+        montant_paye = meta.get("montant_paye", meta["montant"])
+        reste_a_payer = meta.get("reste_a_payer", 0)
+
+        # Si le paiement est déjà complet, informer l'utilisateur
+        if reste_a_payer <= 0:
+            messagebox.showinfo("Information", f"Le paiement de {nom} {prenom} pour {mois} est déjà complet.\n\nMontant total : {montant_total}\nMontant payé : {montant_paye}")
+            return
+
+        # Demander le montant à ajouter
+        from tkinter import simpledialog
+        montant_additionnel = simpledialog.askfloat(
+            "Ajouter un paiement",
+            f"Montant à ajouter pour {nom} {prenom}\n\n"
+            f"Montant total : {montant_total}\n"
+            f"Déjà payé : {montant_paye}\n"
+            f"Reste à payer : {reste_a_payer}\n\n"
+            f"Entrez le montant à ajouter :",
+            minvalue=0.01,
+            maxvalue=float(reste_a_payer)
+        )
+
+        if montant_additionnel is not None:
+            self._show_loading("Ajout du paiement...")
+            try:
+                success, message = ajouter_paiement_complementaire(paiement_id, montant_additionnel)
+                if success:
+                    self.charger_donnees()
+                    self._set_status(f"✅ {message}")
+                else:
+                    messagebox.showerror("Erreur", message)
+                    self._set_status("❌ L'ajout du paiement a échoué.")
             finally:
                 self._hide_loading()
 

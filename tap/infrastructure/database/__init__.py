@@ -1,6 +1,7 @@
 from tap.infrastructure.database.connection import obtenir_connexion
 from tap.infrastructure.database.migrations import run_migrations
 from tap.infrastructure.database.repository import (
+    ajouter_paiement_complementaire,
     get_historique_locataire,
     get_souscriptions,
     get_souscriptions_avec_filtres,
@@ -23,4 +24,5 @@ __all__ = [
     "get_historique_locataire",
     "modifier_souscription",
     "supprimer_souscription",
+    "ajouter_paiement_complementaire",
 ]

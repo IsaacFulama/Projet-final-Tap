@@ -170,9 +170,75 @@ def renommer_statut_paye_en_en_regle():
             conn.close()
 
 
+def ajouter_colonnes_acompte():
+    """Ajoute les colonnes pour la gestion des acomptes."""
+    try:
+        conn = obtenir_connexion()
+        if conn.is_connected():
+            cursor = conn.cursor()
+
+            # Vérifier et ajouter montant_total
+            cursor.execute("SHOW COLUMNS FROM paiements LIKE 'montant_total'")
+            if not cursor.fetchone():
+                cursor.execute(
+                    "ALTER TABLE paiements ADD COLUMN montant_total DECIMAL(10,2) DEFAULT montant"
+                )
+                # Initialiser montant_total avec la valeur actuelle de montant
+                cursor.execute("UPDATE paiements SET montant_total = montant WHERE montant_total IS NULL")
+                print("Colonne montant_total ajoutée avec succès")
+
+            # Vérifier et ajouter montant_paye
+            cursor.execute("SHOW COLUMNS FROM paiements LIKE 'montant_paye'")
+            if not cursor.fetchone():
+                cursor.execute(
+                    "ALTER TABLE paiements ADD COLUMN montant_paye DECIMAL(10,2) DEFAULT 0"
+                )
+                # Initialiser montant_paye avec la valeur actuelle de montant pour les enregistrements existants
+                cursor.execute("UPDATE paiements SET montant_paye = montant WHERE montant_paye IS NULL OR montant_paye = 0")
+                print("Colonne montant_paye ajoutée avec succès")
+
+            # Vérifier et ajouter reste_a_payer
+            cursor.execute("SHOW COLUMNS FROM paiements LIKE 'reste_a_payer'")
+            if not cursor.fetchone():
+                cursor.execute(
+                    "ALTER TABLE paiements ADD COLUMN reste_a_payer DECIMAL(10,2) DEFAULT 0"
+                )
+                # Calculer le reste initial
+                cursor.execute("UPDATE paiements SET reste_a_payer = GREATEST(0, montant_total - montant_paye) WHERE reste_a_payer IS NULL OR reste_a_payer = 0")
+                print("Colonne reste_a_payer ajoutée avec succès")
+
+            # Vérifier et ajouter statut_paiement
+            cursor.execute("SHOW COLUMNS FROM paiements LIKE 'statut_paiement'")
+            if not cursor.fetchone():
+                cursor.execute(
+                    "ALTER TABLE paiements ADD COLUMN statut_paiement VARCHAR(20) DEFAULT 'En attente'"
+                )
+                # Définir le statut initial
+                cursor.execute(
+                    "UPDATE paiements SET statut_paiement = "
+                    "CASE "
+                    "WHEN montant_paye >= montant_total THEN 'Complet' "
+                    "WHEN montant_paye > 0 THEN 'Partiel' "
+                    "ELSE 'En attente' "
+                    "END WHERE statut_paiement IS NULL OR statut_paiement = 'En attente'"
+                )
+                print("Colonne statut_paiement ajoutée avec succès")
+
+            conn.commit()
+
+            cursor.close()
+            conn.close()
+    except Error as e:
+        print(f"Erreur lors de l'ajout des colonnes acompte: {e}")
+    finally:
+        if "conn" in locals() and conn.is_connected():
+            conn.close()
+
+
 def run_migrations():
     ajouter_colonne_date_creation()
     ajouter_colonne_statut_souscription()
     renommer_statut_ordinaire_en_simple()
     renommer_statut_paye_en_en_regle()
     migrer_mois_vers_date()
+    ajouter_colonnes_acompte()
