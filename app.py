@@ -1,5 +1,1 @@
-from main import launch_app
-
-
-if __name__ == "__main__":
-    launch_app()
+from tap.presentation.bootstrap import launch_app

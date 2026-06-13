@@ -36,11 +36,12 @@
 ## Fonctionnalités principales
 
 - **Gestion des paiements** : Enregistrement des paiements de loyers
-- **Suivi des statuts** : Payé, Litigieux, En attente
+- **Suivi des statuts** : En règle, Litigieux, En attente
+- **Statut souscription** : Spécial ou Simple
 - **Historique** : Historique des paiements par locataire
 - **Export PDF** : Export filtré avec totaux par devise
 - **Dashboard** : Analyse financière avec graphiques
-- **Filtres** : Par nom, statut, devise, mois
+- **Filtres** : Par nom, statut, statut souscription, devise, mois
 
 ## Support technique
 
@@ -54,5 +55,5 @@ Pour toute question, consulter le fichier `INSTALLATION.md` ou contacter le supp
 - Le fichier `config.json` doit être dans le même dossier que l'exécutable
 
 ## Version
-- Version : 3.0
-- Date de livraison : Juin 2026
+- Version : 3.2
+- Date de livraison : 12 juin 2026

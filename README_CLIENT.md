@@ -17,7 +17,9 @@
 
 ## Fonctionnalités
 - Ajout et suivi des paiements
+- Statut de souscription sur chaque paiement : Spécial ou Simple
 - Filtrage par nom, mois, statut et devise
+- Filtrage par statut de souscription
 - Export PDF et CSV
 - Historique des paiements par locataire
 
@@ -25,4 +27,3 @@
 - Vérifier que MySQL est bien lancé
 - Vérifier que `config.json` pointe vers la bonne base
 - Consulter `INSTALLATION.md`
-
