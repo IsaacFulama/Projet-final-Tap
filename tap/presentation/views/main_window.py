@@ -13,6 +13,8 @@ from tap.infrastructure.database import (
     get_historique_locataire,
     get_souscriptions,
     mettre_a_jour_statut,
+    modifier_souscription,
+    supprimer_souscription,
 )
 from tap.presentation.components.widgets import SidebarButton, StatCard
 from tap.presentation.dialogs.export_pdf import ExportPDFDialog
@@ -738,12 +740,18 @@ class AppGestionLoyers(ctk.CTk):
         self.context_menu = Menu(self, tearoff=0, bg=C["bg_section"],
                                   fg=C["text_hi"], activebackground=C["border"],
                                   activeforeground=C["accent"], bd=0)
+        self.context_menu.add_command(label="  ✏️  Modifier",
+                                       command=self.modifier_paiement)
+        self.context_menu.add_separator()
         self.context_menu.add_command(label="  ✅  Marquer En règle",
                                        command=lambda: self.modifier_statut("En règle"))
         self.context_menu.add_command(label="  ⚠️  Marquer Litigieux",
                                        command=lambda: self.modifier_statut("Litigieux"))
         self.context_menu.add_command(label="  ⏳  Marquer En attente",
                                        command=lambda: self.modifier_statut("En attente"))
+        self.context_menu.add_separator()
+        self.context_menu.add_command(label="  🗑️  Supprimer",
+                                       command=self.supprimer_paiement)
         self.tableau.bind("<Button-3>", self.afficher_menu_contextuel)
         self.tableau.bind("<Double-1>", self.afficher_historique_locataire)
         self.tableau.bind("<Return>", self.afficher_historique_locataire)
@@ -1039,6 +1047,13 @@ class AppGestionLoyers(ctk.CTk):
                     self._row_meta[item_id] = {
                         "paiement_id": paiement_id,
                         "locataire_id": locataire_id,
+                        "nom": ligne[2],
+                        "prenom": ligne[3],
+                        "mois": ligne[4],
+                        "montant": ligne[5],
+                        "devise": ligne[6],
+                        "statut_souscription": ligne[7],
+                        "statut": ligne[8],
                     }
                 self.update_idletasks()
 
@@ -1047,7 +1062,7 @@ class AppGestionLoyers(ctk.CTk):
                 self.tableau.selection_set(first_item)
                 self.tableau.focus(first_item)
                 self.lbl_table_hint.configure(
-                    text="Astuce : double-clic pour l'historique, clic droit pour changer le statut."
+                    text="Astuce : double-clic pour l'historique, clic droit pour modifier/supprimer/changer le statut."
                 )
             else:
                 self.lbl_table_hint.configure(
@@ -1310,6 +1325,69 @@ class AppGestionLoyers(ctk.CTk):
                 self.tableau.item(item_id, tags=tuple(current_tags))
         except Exception:
             pass
+
+    def modifier_paiement(self):
+        """Ouvre le formulaire de modification pour le paiement sélectionné"""
+        if not hasattr(self, "selected_item"):
+            messagebox.showwarning("Avertissement", "Veuillez sélectionner un paiement à modifier.")
+            return
+
+        meta = self._row_meta.get(str(self.selected_item))
+        if not meta:
+            messagebox.showerror("Erreur", "Impossible de trouver les données du paiement.")
+            return
+
+        # Récupérer les données complètes du paiement
+        paiement_id = meta["paiement_id"]
+        donnees = (
+            paiement_id,
+            meta["locataire_id"],
+            meta["nom"],
+            meta["prenom"],
+            meta["mois"],
+            meta["montant"],
+            meta["devise"],
+            meta["statut_souscription"],
+            meta["statut"]
+        )
+
+        # Ouvrir le formulaire en mode édition
+        FormulaireSouscription(self, self.charger_donnees, paiement_id, donnees)
+
+    def supprimer_paiement(self):
+        """Supprime le paiement sélectionné après confirmation"""
+        if not hasattr(self, "selected_item"):
+            messagebox.showwarning("Avertissement", "Veuillez sélectionner un paiement à supprimer.")
+            return
+
+        meta = self._row_meta.get(str(self.selected_item))
+        if not meta:
+            messagebox.showerror("Erreur", "Impossible de trouver les données du paiement.")
+            return
+
+        paiement_id = meta["paiement_id"]
+        nom = meta["nom"]
+        prenom = meta["prenom"]
+        mois = meta["mois"]
+
+        # Confirmation
+        reponse = messagebox.askyesno(
+            "Confirmation de suppression",
+            f"Êtes-vous sûr de vouloir supprimer le paiement de {nom} {prenom} pour {mois} ?\n\nCette action est irréversible."
+        )
+
+        if reponse:
+            self._show_loading("Suppression du paiement...")
+            try:
+                success, message = supprimer_souscription(paiement_id)
+                if success:
+                    self.charger_donnees()
+                    self._set_status(f"✅ {message}")
+                else:
+                    messagebox.showerror("Erreur", message)
+                    self._set_status("❌ La suppression a échoué.")
+            finally:
+                self._hide_loading()
 
     def afficher_historique_locataire(self, event=None):
         """Affiche l'historique des paiements d'un locataire au double-clic"""

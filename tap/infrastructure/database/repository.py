@@ -251,3 +251,99 @@ def get_historique_locataire(locataire_id):
     finally:
         cursor.close()
         conn.close()
+
+
+def modifier_souscription(
+    paiement_id,
+    nom,
+    prenom,
+    telephone,
+    mois,
+    montant,
+    devise,
+    statut="En attente",
+    statut_souscription="Simple",
+):
+    """Modifie une souscription existante."""
+    mois_date = parse_mois_saisie(mois)
+    if not mois_date:
+        return False, "Format de date invalide. Utilisez AAAA-MM-JJ ou AAAA-MM."
+
+    try:
+        conn = obtenir_connexion()
+        if conn.is_connected():
+            cursor = conn.cursor()
+
+            # Récupérer le locataire_id actuel
+            cursor.execute(
+                "SELECT locataire_id FROM paiements WHERE id = %s",
+                (paiement_id,),
+            )
+            result = cursor.fetchone()
+            if not result:
+                return False, "Paiement non trouvé."
+
+            locataire_id = result[0]
+
+            # Mettre à jour ou créer le locataire
+            cursor.execute(
+                "SELECT id FROM locataires WHERE nom = %s AND prenom = %s AND telephone = %s",
+                (nom, prenom, telephone),
+            )
+            locataire_result = cursor.fetchone()
+
+            if locataire_result:
+                new_locataire_id = locataire_result[0]
+            else:
+                cursor.execute(
+                    "INSERT INTO locataires (nom, prenom, telephone) VALUES (%s, %s, %s)",
+                    (nom, prenom, telephone),
+                )
+                new_locataire_id = cursor.lastrowid
+
+            # Mettre à jour le paiement
+            cursor.execute(
+                "UPDATE paiements SET locataire_id = %s, mois = %s, montant = %s, devise = %s, statut = %s, statut_souscription = %s WHERE id = %s",
+                (
+                    new_locataire_id,
+                    mois_date,
+                    montant,
+                    devise,
+                    statut or "En attente",
+                    statut_souscription or "Simple",
+                    paiement_id,
+                ),
+            )
+
+            conn.commit()
+            return True, "Modification réussie avec succès !"
+
+    except Error as e:
+        return False, f"Erreur de base de données : {e}"
+    finally:
+        if "conn" in locals() and conn.is_connected():
+            cursor.close()
+            conn.close()
+
+
+def supprimer_souscription(paiement_id):
+    """Supprime une souscription."""
+    try:
+        conn = obtenir_connexion()
+        if conn.is_connected():
+            cursor = conn.cursor()
+
+            cursor.execute(
+                "DELETE FROM paiements WHERE id = %s",
+                (paiement_id,),
+            )
+
+            conn.commit()
+            return True, "Suppression réussie avec succès !"
+
+    except Error as e:
+        return False, f"Erreur de base de données : {e}"
+    finally:
+        if "conn" in locals() and conn.is_connected():
+            cursor.close()
+            conn.close()

@@ -5,7 +5,7 @@ from tkinter import messagebox
 
 from tap.config.theme import C
 from tap.core.date_utils import parse_mois_saisie
-from tap.infrastructure.database import inserer_souscription
+from tap.infrastructure.database import inserer_souscription, modifier_souscription
 
 # ── Helpers de validation ──────────────────────────────────────────────────────
 
@@ -119,11 +119,15 @@ class ValidatedField(ctk.CTkFrame):
 # ── Formulaire principal ───────────────────────────────────────────────────────
 
 class FormulaireSouscription(ctk.CTkToplevel):
-    def __init__(self, parent, callback_maj_tableau):
+    def __init__(self, parent, callback_maj_tableau, paiement_id=None, donnees_initiales=None):
         super().__init__(parent)
         self.callback_maj_tableau = callback_maj_tableau
+        self.paiement_id = paiement_id
+        self.mode_edition = paiement_id is not None
+        self.donnees_initiales = donnees_initiales
 
-        self.title('TAP · Nouveau Paiement')
+        title = 'TAP · Modifier Paiement' if self.mode_edition else 'TAP · Nouveau Paiement'
+        self.title(title)
         self._set_initial_geometry()
         self.resizable(True, True)
         self.minsize(420, 480)
@@ -137,6 +141,10 @@ class FormulaireSouscription(ctk.CTkToplevel):
         self.bind('<Escape>', lambda _: self.destroy())
 
         self._build_ui()
+
+        # Pré-remplir si mode édition
+        if self.mode_edition and self.donnees_initiales:
+            self._remplir_champs()
 
         # Auto-focus sur le premier champ
         self.after(120, self.field_nom.focus)
@@ -162,7 +170,8 @@ class FormulaireSouscription(ctk.CTkToplevel):
         header = ctk.CTkFrame(card, fg_color='transparent')
         header.pack(fill='x', padx=24, pady=(24, 16))
 
-        ctk.CTkLabel(header, text='Nouveau Paiement',
+        header_text = 'Modifier Paiement' if self.mode_edition else 'Nouveau Paiement'
+        ctk.CTkLabel(header, text=header_text,
                      font=ctk.CTkFont(family='Georgia', size=22, weight='bold'),
                      text_color=C['accent']).pack(anchor='w')
         ctk.CTkLabel(header, text='Tous les champs marqués * sont obligatoires',
@@ -261,6 +270,33 @@ class FormulaireSouscription(ctk.CTkToplevel):
         )
         self.btn_save.pack(side='right')
 
+    def _remplir_champs(self):
+        """Pré-remplit les champs avec les données existantes."""
+        if not self.donnees_initiales:
+            return
+
+        # donnees_initiales format: (paiement_id, locataire_id, nom, prenom, mois, montant, devise, statut_souscription, statut)
+        paiement_id, locataire_id, nom, prenom, mois, montant, devise, statut_souscription, statut = self.donnees_initiales
+
+        self.field_nom.entry.delete(0, 'end')
+        self.field_nom.entry.insert(0, nom)
+
+        self.field_prenom.entry.delete(0, 'end')
+        self.field_prenom.entry.insert(0, prenom)
+
+        # Téléphone n'est pas dans les données initiales, on laisse vide
+        # self.field_telephone.entry.delete(0, 'end')
+        # self.field_telephone.entry.insert(0, telephone)
+
+        self.field_mois.entry.delete(0, 'end')
+        self.field_mois.entry.insert(0, mois)
+
+        self.field_montant.entry.delete(0, 'end')
+        self.field_montant.entry.insert(0, str(montant))
+
+        self.combo_devise.set(devise)
+        self.combo_statut_souscription.set(statut_souscription)
+
     # ── Helpers UI ─────────────────────────────────────────────────────────────
 
     def _combo(self, master, values: list, default: str) -> ctk.CTkComboBox:
@@ -294,15 +330,27 @@ class FormulaireSouscription(ctk.CTkToplevel):
         self.btn_save.configure(state='disabled', text='Enregistrement…')
         self.update_idletasks()
 
-        success, message = inserer_souscription(
-            self.field_nom.get(),
-            self.field_prenom.get(),
-            self.field_telephone.get(),
-            self.field_mois.get(),
-            self.field_montant.get(),
-            self.combo_devise.get(),
-            statut_souscription=self.combo_statut_souscription.get(),
-        )
+        if self.mode_edition:
+            success, message = modifier_souscription(
+                self.paiement_id,
+                self.field_nom.get(),
+                self.field_prenom.get(),
+                self.field_telephone.get(),
+                self.field_mois.get(),
+                self.field_montant.get(),
+                self.combo_devise.get(),
+                statut_souscription=self.combo_statut_souscription.get(),
+            )
+        else:
+            success, message = inserer_souscription(
+                self.field_nom.get(),
+                self.field_prenom.get(),
+                self.field_telephone.get(),
+                self.field_mois.get(),
+                self.field_montant.get(),
+                self.combo_devise.get(),
+                statut_souscription=self.combo_statut_souscription.get(),
+            )
 
         if success:
             messagebox.showinfo('Succès', message)
