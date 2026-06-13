@@ -196,9 +196,9 @@ class FormulaireSouscription(ctk.CTkToplevel):
                                            validator=_is_valid_name)
         self.field_prenom.pack(side='left', fill='both', expand=True, padx=(8, 0))
 
-        # Téléphone
-        self.field_telephone = ValidatedField(form, 'Téléphone', '+243 XXX XXX XXX',
-                                              validator=_is_valid_phone)
+        # Téléphone (optionnel)
+        self.field_telephone = ValidatedField(form, 'Téléphone (optionnel)', '+243 XXX XXX XXX',
+                                              validator=_is_valid_phone, required=False)
         self.field_telephone.pack(fill='x', pady=(0, 12))
 
         # Ligne 2 : Mois / Montant
@@ -246,7 +246,7 @@ class FormulaireSouscription(ctk.CTkToplevel):
 
         # ─ Navigation clavier : <Return> passe au champ suivant ─
         all_fields = [self.field_nom, self.field_prenom,
-                      self.field_telephone, self.field_mois, self.field_montant, self.field_montant_paye]
+                      self.field_mois, self.field_montant, self.field_montant_paye]
         for i, f in enumerate(all_fields[:-1]):
             f.bind_return(all_fields[i + 1])
         # Dernier champ → soumettre
@@ -329,8 +329,12 @@ class FormulaireSouscription(ctk.CTkToplevel):
     def _enregistrer(self):
         # Forcer la validation de tous les champs obligatoires
         fields = [self.field_nom, self.field_prenom,
-                  self.field_telephone, self.field_mois, self.field_montant]
+                  self.field_mois, self.field_montant]
         errors = [f for f in fields if not f.is_valid()]
+
+        # Valider le téléphone seulement s'il est rempli
+        if self.field_telephone.get() and not self.field_telephone.is_valid():
+            errors.append(self.field_telephone)
 
         # Valider le montant payé seulement s'il est rempli
         if self.field_montant_paye.get() and not self.field_montant_paye.is_valid():

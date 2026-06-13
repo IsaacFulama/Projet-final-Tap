@@ -66,18 +66,27 @@ def inserer_souscription(
         if conn.is_connected():
             cursor = conn.cursor()
 
+            # Recherche insensible à la casse pour le nom et prénom
             cursor.execute(
-                "SELECT id FROM locataires WHERE nom = %s AND prenom = %s AND telephone = %s",
-                (nom, prenom, telephone),
+                "SELECT id, telephone FROM locataires WHERE LOWER(nom) = LOWER(%s) AND LOWER(prenom) = LOWER(%s)",
+                (nom, prenom),
             )
             result = cursor.fetchone()
 
             if result:
                 locataire_id = result[0]
+                # Si un téléphone est fourni et différent, on peut mettre à jour (optionnel)
+                if telephone and telephone != result[1]:
+                    cursor.execute(
+                        "UPDATE locataires SET telephone = %s WHERE id = %s",
+                        (telephone, locataire_id),
+                    )
             else:
+                # Le téléphone est optionnel, peut être NULL
+                telephone_value = telephone if telephone else None
                 cursor.execute(
                     "INSERT INTO locataires (nom, prenom, telephone) VALUES (%s, %s, %s)",
-                    (nom, prenom, telephone),
+                    (nom, prenom, telephone_value),
                 )
                 locataire_id = cursor.lastrowid
 
@@ -315,19 +324,27 @@ def modifier_souscription(
 
             locataire_id = result[0]
 
-            # Mettre à jour ou créer le locataire
+            # Mettre à jour ou créer le locataire (recherche insensible à la casse)
             cursor.execute(
-                "SELECT id FROM locataires WHERE nom = %s AND prenom = %s AND telephone = %s",
-                (nom, prenom, telephone),
+                "SELECT id, telephone FROM locataires WHERE LOWER(nom) = LOWER(%s) AND LOWER(prenom) = LOWER(%s)",
+                (nom, prenom),
             )
             locataire_result = cursor.fetchone()
 
             if locataire_result:
                 new_locataire_id = locataire_result[0]
+                # Si un téléphone est fourni et différent, on peut mettre à jour (optionnel)
+                if telephone and telephone != locataire_result[1]:
+                    cursor.execute(
+                        "UPDATE locataires SET telephone = %s WHERE id = %s",
+                        (telephone, new_locataire_id),
+                    )
             else:
+                # Le téléphone est optionnel, peut être NULL
+                telephone_value = telephone if telephone else None
                 cursor.execute(
                     "INSERT INTO locataires (nom, prenom, telephone) VALUES (%s, %s, %s)",
-                    (nom, prenom, telephone),
+                    (nom, prenom, telephone_value),
                 )
                 new_locataire_id = cursor.lastrowid
 
@@ -390,13 +407,27 @@ def supprimer_souscription(paiement_id):
         if conn.is_connected():
             cursor = conn.cursor()
 
+            # Vérifier si le paiement existe
+            cursor.execute(
+                "SELECT id FROM paiements WHERE id = %s",
+                (paiement_id,),
+            )
+            if not cursor.fetchone():
+                return False, f"Paiement avec ID {paiement_id} introuvable."
+
+            # Supprimer le paiement
             cursor.execute(
                 "DELETE FROM paiements WHERE id = %s",
                 (paiement_id,),
             )
 
+            affected_rows = cursor.rowcount
             conn.commit()
-            return True, "Suppression réussie avec succès !"
+
+            if affected_rows > 0:
+                return True, "Suppression réussie avec succès !"
+            else:
+                return False, "Aucune ligne supprimée. Le paiement n'existe peut-être pas."
 
     except Error as e:
         return False, f"Erreur de base de données : {e}"
