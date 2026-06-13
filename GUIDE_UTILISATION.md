@@ -92,8 +92,8 @@ L'interface se compose de trois onglets principaux :
 **Champs obligatoires :**
 - **Nom** : Nom du locataire (ex: "Dupont")
 - **Prénom** : Prénom du locataire (ex: "Jean")
-- **Mois** : Sélectionnez le mois dans la liste déroulante (ex: "Janvier 2024")
-- **Montant total** : Montant total de la souscription (ex: "500")
+- **Mois** : Sélectionnez le mois dans la liste déroulante (Septembre 2025 à Décembre 2029)
+- **Montant souscrit** : Montant total de la souscription (ex: "500")
 - **Devise** : Devise du paiement (CDF, USD, EUR, XAF, CAD)
 - **Type de souscription** : "Simple" ou "Spécial"
 
@@ -245,6 +245,31 @@ Pour ajouter un paiement à un acompte existant :
 2. Cliquez sur **"Exporter CSV"**
 3. Choisissez l'emplacement de sauvegarde
 4. Le fichier CSV est généré avec toutes les données
+
+---
+
+## Système automatique de mise à jour des statuts
+
+L'application inclut un système automatique qui met à jour les statuts de paiement :
+
+### Fonctionnement
+- **Déclenchement** : Le système vérifie automatiquement les statuts à chaque démarrage de l'application
+- **Règle du 5 du mois** : Si nous sommes le 5 du mois, le système change automatiquement les statuts des paiements en attente ou litigieux du mois précédent
+- **Logique** :
+  - Paiements "En attente" → Deviennent "Litigieux" le 5 du mois suivant
+  - Paiements "Litigieux" → Restent "Litigieux" (pour suivi continu)
+  - Paiements "En règle" → Ne sont pas modifiés
+
+### Rapport d'erreurs
+- Le système inclut un module de rapport d'erreurs qui ne touche PAS à la base de données
+- Les erreurs sont loggées dans des fichiers JSON dans le dossier `error_reports/`
+- Les logs sont sauvegardés dans `error_reports.log`
+- Ce système permet de diagnostiquer les problèmes sans risquer de corrompre les données
+
+### Avantages
+- **Automatisation** : Moins de travail manuel pour le suivi des paiements
+- **Sécurité** : Le système de rapport d'erreurs protège la base de données
+- **Traçabilité** : Tous les changements automatiques sont loggés
 
 ---
 
