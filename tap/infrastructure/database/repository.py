@@ -28,7 +28,7 @@ def inserer_souscription(
     prenom,
     telephone,
     mois,
-    montant,
+    montant_souscrit,
     devise,
     statut="En attente",
     statut_souscription="Simple",
@@ -40,13 +40,13 @@ def inserer_souscription(
 
     # Si montant_paye n'est pas spécifié, on considère que c'est un paiement complet
     if montant_paye is None:
-        montant_paye = montant
+        montant_paye = montant_souscrit
 
     # Calculer le reste à payer
-    reste_a_payer = max(0, float(montant) - float(montant_paye))
+    reste_a_payer = max(0, float(montant_souscrit) - float(montant_paye))
 
     # Déterminer le statut de paiement
-    if float(montant_paye) >= float(montant):
+    if float(montant_paye) >= float(montant_souscrit):
         statut_paiement = "Complet"
     elif float(montant_paye) > 0:
         statut_paiement = "Partiel"
@@ -56,7 +56,7 @@ def inserer_souscription(
     # Déterminer le statut automatiquement selon le montant payé
     if float(montant_paye) <= 0:
         statut = "En attente"
-    elif float(montant_paye) < float(montant):
+    elif float(montant_paye) < float(montant_souscrit):
         statut = "Litigieux"
     else:
         statut = "En règle"
@@ -96,8 +96,8 @@ def inserer_souscription(
                 (
                     locataire_id,
                     mois_date,
-                    montant,
-                    montant,
+                    montant_souscrit,
+                    montant_souscrit,
                     montant_paye,
                     reste_a_payer,
                     devise,
@@ -297,7 +297,7 @@ def modifier_souscription(
     prenom,
     telephone,
     mois,
-    montant,
+    montant_souscrit,
     devise,
     statut="En attente",
     statut_souscription="Simple",
@@ -350,13 +350,13 @@ def modifier_souscription(
 
             # Si montant_paye n'est pas spécifié, on considère que c'est un paiement complet
             if montant_paye is None:
-                montant_paye = montant
+                montant_paye = montant_souscrit
 
             # Calculer le reste à payer
-            reste_a_payer = max(0, float(montant) - float(montant_paye))
+            reste_a_payer = max(0, float(montant_souscrit) - float(montant_paye))
 
             # Déterminer le statut de paiement
-            if float(montant_paye) >= float(montant):
+            if float(montant_paye) >= float(montant_souscrit):
                 statut_paiement = "Complet"
             elif float(montant_paye) > 0:
                 statut_paiement = "Partiel"
@@ -366,7 +366,7 @@ def modifier_souscription(
             # Déterminer le statut automatiquement selon le montant payé
             if float(montant_paye) <= 0:
                 statut = "En attente"
-            elif float(montant_paye) < float(montant):
+            elif float(montant_paye) < float(montant_souscrit):
                 statut = "Litigieux"
             else:
                 statut = "En règle"
@@ -377,8 +377,8 @@ def modifier_souscription(
                 (
                     new_locataire_id,
                     mois_date,
-                    montant,
-                    montant,
+                    montant_souscrit,
+                    montant_souscrit,
                     montant_paye,
                     reste_a_payer,
                     devise,

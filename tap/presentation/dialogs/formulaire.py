@@ -201,46 +201,51 @@ class FormulaireSouscription(ctk.CTkToplevel):
                                               validator=_is_valid_phone, required=False)
         self.field_telephone.pack(fill='x', pady=(0, 12))
 
-        # Ligne 2 : Mois / Montant
+        # Ligne 2 : Mois / Montant souscrit
         row2 = ctk.CTkFrame(form, fg_color='transparent')
         row2.pack(fill='x', pady=(0, 12))
 
-        # Sélecteur de mois rapide
+        # Sélecteur de mois rapide (Septembre 2025 à 2029)
         col_mois = ctk.CTkFrame(row2, fg_color='transparent')
         col_mois.pack(side='left', fill='both', expand=True, padx=(0, 8))
         ctk.CTkLabel(col_mois, text='Mois',
                      font=ctk.CTkFont(size=11, weight='bold'),
                      text_color=C['text_hi']).pack(anchor='w', pady=(0, 6))
 
-        # Générer la liste des mois (année courante + année suivante)
+        # Générer la liste des mois (Septembre 2025 à Décembre 2029)
         mois_liste = []
-        today = date.today()
-        for annee_offset in range(2):  # Année courante et suivante
-            annee = today.year + annee_offset
+        for annee in range(2025, 2030):  # 2025 à 2029
             for mois in range(1, 13):
+                # Commencer à septembre 2025
+                if annee == 2025 and mois < 9:
+                    continue
                 mois_date = date(annee, mois, 1)
                 nom_mois = mois_date.strftime('%B %Y').capitalize()
                 valeur_mois = mois_date.strftime('%Y-%m-%d')
                 mois_liste.append(f"{nom_mois} ({valeur_mois})")
 
-        default_mois = today.replace(day=1).strftime('%B %Y (%Y-%m-%d)').capitalize()
+        default_mois = date(2025, 9, 1).strftime('%B %Y (%Y-%m-%d)').capitalize()
         self.combo_mois = self._combo(col_mois, mois_liste, default_mois)
         self.combo_mois.pack(fill='x')
 
-        self.field_montant = ValidatedField(row2, 'Montant total', '0.00',
-                                            validator=_is_valid_amount)
-        self.field_montant.pack(side='left', fill='both', expand=True, padx=(0, 8))
+        self.field_montant_souscrit = ValidatedField(row2, 'Montant souscrit', '0.00',
+                                                     validator=_is_valid_amount)
+        self.field_montant_souscrit.pack(side='left', fill='both', expand=True, padx=(0, 8))
+
+        # Ligne 3 : Montant payé
+        row3 = ctk.CTkFrame(form, fg_color='transparent')
+        row3.pack(fill='x', pady=(0, 12))
 
         # Montant payé (acompte optionnel)
-        self.field_montant_paye = ValidatedField(row2, 'Montant payé (optionnel)', 'Laisser vide pour paiement complet',
+        self.field_montant_paye = ValidatedField(row3, 'Montant payé (optionnel)', 'Laisser vide pour paiement complet',
                                               validator=_is_valid_amount, required=False)
-        self.field_montant_paye.pack(side='left', fill='both', expand=True, padx=(8, 0))
+        self.field_montant_paye.pack(side='left', fill='both', expand=True, padx=(0, 8))
 
-        # Ligne 3 : Devise
-        row3 = ctk.CTkFrame(form, fg_color='transparent')
-        row3.pack(fill='x', pady=(0, 16))
+        # Ligne 4 : Devise
+        row4 = ctk.CTkFrame(form, fg_color='transparent')
+        row4.pack(fill='x', pady=(0, 16))
 
-        col_devise = ctk.CTkFrame(row3, fg_color='transparent')
+        col_devise = ctk.CTkFrame(row4, fg_color='transparent')
         col_devise.pack(side='left', fill='both', expand=True)
         ctk.CTkLabel(col_devise, text='Devise',
                      font=ctk.CTkFont(size=11, weight='bold'),
@@ -248,7 +253,7 @@ class FormulaireSouscription(ctk.CTkToplevel):
         self.combo_devise = self._combo(col_devise, ['CDF', 'USD', 'EUR', 'XAF', 'CAD'], 'CDF')
         self.combo_devise.pack(fill='x')
 
-        col_statut_souscription = ctk.CTkFrame(row3, fg_color='transparent')
+        col_statut_souscription = ctk.CTkFrame(row4, fg_color='transparent')
         col_statut_souscription.pack(side='left', fill='both', expand=True, padx=(12, 0))
         ctk.CTkLabel(col_statut_souscription, text='Statut souscription',
                      font=ctk.CTkFont(size=11, weight='bold'),
@@ -262,7 +267,7 @@ class FormulaireSouscription(ctk.CTkToplevel):
 
         # ─ Navigation clavier : <Return> passe au champ suivant ─
         all_fields = [self.field_nom, self.field_prenom,
-                      self.field_montant, self.field_montant_paye]
+                      self.field_montant_souscrit, self.field_montant_paye]
         for i, f in enumerate(all_fields[:-1]):
             f.bind_return(all_fields[i + 1])
         # Dernier champ → soumettre
@@ -321,8 +326,8 @@ class FormulaireSouscription(ctk.CTkToplevel):
             # Si la conversion échoue, laisser la valeur par défaut
             pass
 
-        self.field_montant.entry.delete(0, 'end')
-        self.field_montant.entry.insert(0, str(montant_total))
+        self.field_montant_souscrit.entry.delete(0, 'end')
+        self.field_montant_souscrit.entry.insert(0, str(montant_total))
 
         # Montant payé (si différent du total)
         if montant_paye and float(montant_paye) < float(montant_total):
@@ -354,7 +359,7 @@ class FormulaireSouscription(ctk.CTkToplevel):
     def _enregistrer(self):
         # Forcer la validation de tous les champs obligatoires
         fields = [self.field_nom, self.field_prenom,
-                  self.field_montant]
+                  self.field_montant_souscrit]
         errors = [f for f in fields if not f.is_valid()]
 
         # Valider le téléphone seulement s'il est rempli
@@ -375,7 +380,10 @@ class FormulaireSouscription(ctk.CTkToplevel):
         if '(' in mois_selection and ')' in mois_selection:
             mois = mois_selection.split('(')[1].split(')')[0]
         else:
-            mois = date.today().replace(day=1).strftime('%Y-%m-%d')
+            mois = date(2025, 9, 1).strftime('%Y-%m-%d')
+
+        # Récupérer le montant souscrit
+        montant_souscrit = self.field_montant_souscrit.get()
 
         # Récupérer le montant payé (optionnel)
         montant_paye = self.field_montant_paye.get()
@@ -393,7 +401,7 @@ class FormulaireSouscription(ctk.CTkToplevel):
                 self.field_prenom.get(),
                 self.field_telephone.get(),
                 mois,
-                self.field_montant.get(),
+                montant_souscrit,
                 self.combo_devise.get(),
                 statut_souscription=self.combo_statut_souscription.get(),
                 montant_paye=montant_paye,
@@ -404,7 +412,7 @@ class FormulaireSouscription(ctk.CTkToplevel):
                 self.field_prenom.get(),
                 self.field_telephone.get(),
                 mois,
-                self.field_montant.get(),
+                montant_souscrit,
                 self.combo_devise.get(),
                 statut_souscription=self.combo_statut_souscription.get(),
                 montant_paye=montant_paye,
