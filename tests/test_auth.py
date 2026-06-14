@@ -1,0 +1,189 @@
+"""
+Tests unitaires pour le module d'authentification.
+
+Ce module contient les tests pour le système d'authentification sécurisé
+incluant le hashage des mots de passe et la gestion des tentatives.
+"""
+
+import pytest
+from tap.core.auth import AuthenticationManager, authenticate_user
+
+
+class TestAuthenticationManager:
+    """Tests pour le gestionnaire d'authentification."""
+    
+    def setup_method(self):
+        """Initialise un gestionnaire d'authentification pour chaque test."""
+        self.auth_manager = AuthenticationManager()
+    
+    def test_default_user_exists(self):
+        """Teste que l'utilisateur par défaut existe."""
+        assert "TAPADM" in self.auth_manager._users
+    
+    def test_default_user_authentication(self):
+        """Teste l'authentification avec l'utilisateur par défaut."""
+        success, message = self.auth_manager.authenticate("TAPADM", "TAPADM")
+        assert success is True
+        assert "réussie" in message.lower()
+    
+    def test_wrong_password(self):
+        """Teste qu'un mauvais mot de passe est rejeté."""
+        success, message = self.auth_manager.authenticate("TAPADM", "wrongpassword")
+        assert success is False
+        assert "incorrect" in message.lower()
+    
+    def test_wrong_username(self):
+        """Teste qu'un mauvais nom d'utilisateur est rejeté."""
+        success, message = self.auth_manager.authenticate("wronguser", "TAPADM")
+        assert success is False
+        assert "incorrect" in message.lower()
+    
+    def test_empty_credentials(self):
+        """Teste que des identifiants vides sont rejetés."""
+        success, message = self.auth_manager.authenticate("", "")
+        assert success is False
+        
+        success, message = self.auth_manager.authenticate("TAPADM", "")
+        assert success is False
+        
+        success, message = self.auth_manager.authenticate("", "TAPADM")
+        assert success is False
+    
+    def test_password_hashing(self):
+        """Teste que les mots de passe sont correctement hashés."""
+        password = "testpassword123"
+        hashed = self.auth_manager._hash_password(password)
+        
+        # Le hash doit contenir un sel et le hash
+        assert ":" in hashed
+        assert hashed != password
+        
+        # Vérifier que le même mot de passe produit le même hash
+        assert self.auth_manager._verify_password(password, hashed) is True
+    
+    def test_password_verification(self):
+        """Teste la vérification des mots de passe."""
+        password = "testpassword123"
+        hashed = self.auth_manager._hash_password(password)
+        
+        assert self.auth_manager._verify_password(password, hashed) is True
+        assert self.auth_manager._verify_password("wrongpassword", hashed) is False
+    
+    def test_add_user(self):
+        """Teste l'ajout d'un nouvel utilisateur."""
+        success, message = self.auth_manager.add_user("newuser", "password123")
+        assert success is True
+        assert "newuser" in self.auth_manager._users
+        
+        # Teste l'authentification avec le nouvel utilisateur
+        success, _ = self.auth_manager.authenticate("newuser", "password123")
+        assert success is True
+    
+    def test_add_duplicate_user(self):
+        """Teste qu'on ne peut pas ajouter un utilisateur existant."""
+        success, message = self.auth_manager.add_user("TAPADM", "newpassword")
+        assert success is False
+        assert "existe déjà" in message.lower()
+    
+    def test_add_user_short_password(self):
+        """Teste qu'on ne peut pas ajouter un utilisateur avec un mot de passe trop court."""
+        success, message = self.auth_manager.add_user("newuser", "short")
+        assert success is False
+        assert "au moins 8 caractères" in message.lower()
+    
+    def test_change_password(self):
+        """Teste le changement de mot de passe."""
+        old_password = "TAPADM"
+        new_password = "newpassword123"
+        
+        success, message = self.auth_manager.change_password("TAPADM", old_password, new_password)
+        assert success is True
+        
+        # Vérifier que l'ancien mot de passe ne fonctionne plus
+        success, _ = self.auth_manager.authenticate("TAPADM", old_password)
+        assert success is False
+        
+        # Vérifier que le nouveau mot de passe fonctionne
+        success, _ = self.auth_manager.authenticate("TAPADM", new_password)
+        assert success is True
+    
+    def test_change_password_wrong_old_password(self):
+        """Teste qu'on ne peut pas changer le mot de passe avec un mauvais ancien mot de passe."""
+        success, message = self.auth_manager.change_password("TAPADM", "wrongpassword", "newpassword")
+        assert success is False
+        assert "incorrect" in message.lower()
+    
+    def test_change_password_short_new_password(self):
+        """Teste qu'on ne peut pas mettre un mot de passe trop court."""
+        success, message = self.auth_manager.change_password("TAPADM", "TAPADM", "short")
+        assert success is False
+        assert "au moins 8 caractères" in message.lower()
+    
+    def test_deactivate_user(self):
+        """Teste la désactivation d'un utilisateur."""
+        success, message = self.auth_manager.deactivate_user("TAPADM")
+        assert success is True
+        
+        # Vérifier que l'utilisateur ne peut plus s'authentifier
+        success, message = self.auth_manager.authenticate("TAPADM", "TAPADM")
+        assert success is False
+        assert "désactivé" in message.lower()
+    
+    def test_deactivate_nonexistent_user(self):
+        """Teste qu'on ne peut pas désactiver un utilisateur inexistant."""
+        success, message = self.auth_manager.deactivate_user("nonexistent")
+        assert success is False
+        assert "non trouvé" in message.lower()
+    
+    def test_failed_attempts_tracking(self):
+        """Teste le suivi des tentatives échouées."""
+        # Faire plusieurs tentatives échouées
+        for _ in range(3):
+            self.auth_manager.authenticate("TAPADM", "wrongpassword")
+        
+        assert "TAPADM" in self.auth_manager._failed_attempts
+        assert self.auth_manager._failed_attempts["TAPADM"][0] == 3
+    
+    def test_account_lockout(self):
+        """Teste le verrouillage du compte après trop de tentatives."""
+        # Faire 5 tentatives échouées (le maximum)
+        for _ in range(5):
+            self.auth_manager.authenticate("TAPADM", "wrongpassword")
+        
+        # Le compte devrait être verrouillé
+        success, message = self.auth_manager.authenticate("TAPADM", "TAPADM")
+        assert success is False
+        assert "verrouillé" in message.lower()
+    
+    def test_get_user_info(self):
+        """Teste la récupération des informations utilisateur."""
+        user_info = self.auth_manager.get_user_info("TAPADM")
+        
+        assert user_info is not None
+        assert user_info["username"] == "TAPADM"
+        assert "created_at" in user_info
+        assert "is_active" in user_info
+        assert "password_hash" not in user_info  # Le mot de passe ne doit pas être inclus
+    
+    def test_get_nonexistent_user_info(self):
+        """Teste la récupération d'informations pour un utilisateur inexistant."""
+        user_info = self.auth_manager.get_user_info("nonexistent")
+        assert user_info is None
+
+
+class TestAuthenticateUser:
+    """Tests pour la fonction utilitaire d'authentification."""
+    
+    def test_authenticate_user_success(self):
+        """Teste l'authentification réussie via la fonction utilitaire."""
+        success, message = authenticate_user("TAPADM", "TAPADM")
+        assert success is True
+    
+    def test_authenticate_user_failure(self):
+        """Teste l'échec de l'authentification via la fonction utilitaire."""
+        success, message = authenticate_user("TAPADM", "wrongpassword")
+        assert success is False
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

@@ -1,6 +1,7 @@
 """
 Module de mise à jour automatique des statuts de paiement.
-Change automatiquement le statut à "Litigieux" le 5 du mois suivant pour les paiements en attente.
+Change automatiquement le statut à "Litigieux" le 7 de chaque mois pour les paiements en attente.
+Utilise la date du système de l'ordinateur pour déterminer quand exécuter la mise à jour.
 """
 
 import logging
@@ -25,9 +26,11 @@ def verifier_et_mettre_a_jour_statuts() -> Tuple[int, int]:
     """
     Vérifie et met à jour automatiquement les statuts des paiements.
     
-    Change le statut à "Litigieux" le 5 du mois suivant pour les paiements:
+    Change le statut à "Litigieux" le 7 de chaque mois pour les paiements:
     - En attente (sans paiement)
     - Avec acompte (paiement partiel)
+    
+    Utilise la date du système de l'ordinateur pour déterminer le jour actuel.
     
     Returns:
         Tuple[int, int]: (nombre de paiements mis à jour, nombre d'erreurs)
@@ -42,15 +45,15 @@ def verifier_et_mettre_a_jour_statuts() -> Tuple[int, int]:
         if conn.is_connected():
             cursor = conn.cursor()
             
-            # Date actuelle
+            # Date actuelle du système
             aujourdhui = date.today()
             jour_actuel = aujourdhui.day
             
-            logger.info(f"Vérification automatique des statuts - Date: {aujourdhui}")
+            logger.info(f"Vérification automatique des statuts - Date système: {aujourdhui}")
             
-            # Ne faire la mise à jour que le 5 du mois
-            if jour_actuel != 5:
-                logger.info(f"Aucune mise à jour nécessaire (jour {jour_actuel}, pas le 5)")
+            # Ne faire la mise à jour que le 7 du mois
+            if jour_actuel != 7:
+                logger.info(f"Aucune mise à jour nécessaire (jour {jour_actuel}, pas le 7)")
                 return 0, 0
             
             # Trouver les paiements qui doivent être mis à jour

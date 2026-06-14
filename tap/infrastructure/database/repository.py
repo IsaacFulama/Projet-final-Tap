@@ -38,28 +38,28 @@ def inserer_souscription(
     if not mois_date:
         return False, "Format de date invalide. Utilisez AAAA-MM-JJ ou AAAA-MM."
 
-    # Si montant_paye n'est pas spécifié, on considère que c'est un paiement complet
+    # Si montant_paye n'est pas spécifié, on considère que c'est 0 (pas de paiement)
     if montant_paye is None:
-        montant_paye = montant_souscrit
+        montant_paye = 0.0
 
     # Calculer le reste à payer
     reste_a_payer = max(0, float(montant_souscrit) - float(montant_paye))
 
     # Déterminer le statut de paiement
     if float(montant_paye) >= float(montant_souscrit):
-        statut_paiement = "Complet"
+        statut_paiement = "En règle"
     elif float(montant_paye) > 0:
         statut_paiement = "Partiel"
     else:
         statut_paiement = "En attente"
 
     # Déterminer le statut automatiquement selon le montant payé
-    if float(montant_paye) <= 0:
-        statut = "En attente"
-    elif float(montant_paye) < float(montant_souscrit):
-        statut = "Litigieux"
-    else:
+    # Le statut devient "En règle" SEULEMENT si montant payé >= montant souscrit
+    # Sinon, le statut reste "En attente" par défaut
+    if float(montant_paye) >= float(montant_souscrit):
         statut = "En règle"
+    else:
+        statut = "En attente"
 
     try:
         conn = obtenir_connexion()
@@ -77,20 +77,28 @@ def inserer_souscription(
                 locataire_id = result[0]
                 # Si un téléphone est fourni et différent, on peut mettre à jour (optionnel)
                 if telephone and telephone != result[1]:
-                    cursor.execute(
+                    # Créer un nouveau curseur pour l'UPDATE
+                    update_cursor = conn.cursor()
+                    update_cursor.execute(
                         "UPDATE locataires SET telephone = %s WHERE id = %s",
                         (telephone, locataire_id),
                     )
+                    update_cursor.close()
             else:
                 # Le téléphone est optionnel, peut être NULL
                 telephone_value = telephone if telephone else None
-                cursor.execute(
+                # Créer un nouveau curseur pour l'INSERT
+                insert_cursor = conn.cursor()
+                insert_cursor.execute(
                     "INSERT INTO locataires (nom, prenom, telephone) VALUES (%s, %s, %s)",
                     (nom, prenom, telephone_value),
                 )
-                locataire_id = cursor.lastrowid
+                locataire_id = insert_cursor.lastrowid
+                insert_cursor.close()
 
-            cursor.execute(
+            # Créer un nouveau curseur pour l'INSERT des paiements
+            paiement_cursor = conn.cursor()
+            paiement_cursor.execute(
                 "INSERT INTO paiements (locataire_id, mois, montant, montant_total, montant_paye, reste_a_payer, devise, statut, statut_souscription, statut_paiement) "
                 "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                 (
@@ -106,6 +114,7 @@ def inserer_souscription(
                     statut_paiement,
                 ),
             )
+            paiement_cursor.close()
 
             conn.commit()
             return True, "Enregistrement réussi avec succès !"
@@ -325,51 +334,60 @@ def modifier_souscription(
             locataire_id = result[0]
 
             # Mettre à jour ou créer le locataire (recherche insensible à la casse)
-            cursor.execute(
+            # Créer un nouveau curseur pour cette requête
+            locataire_cursor = conn.cursor()
+            locataire_cursor.execute(
                 "SELECT id, telephone FROM locataires WHERE LOWER(nom) = LOWER(%s) AND LOWER(prenom) = LOWER(%s)",
                 (nom, prenom),
             )
-            locataire_result = cursor.fetchone()
+            locataire_result = locataire_cursor.fetchone()
+            locataire_cursor.close()
 
             if locataire_result:
                 new_locataire_id = locataire_result[0]
                 # Si un téléphone est fourni et différent, on peut mettre à jour (optionnel)
                 if telephone and telephone != locataire_result[1]:
-                    cursor.execute(
+                    # Créer un nouveau curseur pour l'UPDATE
+                    update_cursor = conn.cursor()
+                    update_cursor.execute(
                         "UPDATE locataires SET telephone = %s WHERE id = %s",
                         (telephone, new_locataire_id),
                     )
+                    update_cursor.close()
             else:
                 # Le téléphone est optionnel, peut être NULL
                 telephone_value = telephone if telephone else None
-                cursor.execute(
+                # Créer un nouveau curseur pour l'INSERT
+                insert_cursor = conn.cursor()
+                insert_cursor.execute(
                     "INSERT INTO locataires (nom, prenom, telephone) VALUES (%s, %s, %s)",
                     (nom, prenom, telephone_value),
                 )
-                new_locataire_id = cursor.lastrowid
+                new_locataire_id = insert_cursor.lastrowid
+                insert_cursor.close()
 
-            # Si montant_paye n'est pas spécifié, on considère que c'est un paiement complet
+            # Si montant_paye n'est pas spécifié, on considère que c'est 0 (pas de paiement)
             if montant_paye is None:
-                montant_paye = montant_souscrit
+                montant_paye = 0.0
 
             # Calculer le reste à payer
             reste_a_payer = max(0, float(montant_souscrit) - float(montant_paye))
 
             # Déterminer le statut de paiement
             if float(montant_paye) >= float(montant_souscrit):
-                statut_paiement = "Complet"
+                statut_paiement = "En règle"
             elif float(montant_paye) > 0:
                 statut_paiement = "Partiel"
             else:
                 statut_paiement = "En attente"
 
             # Déterminer le statut automatiquement selon le montant payé
-            if float(montant_paye) <= 0:
-                statut = "En attente"
-            elif float(montant_paye) < float(montant_souscrit):
-                statut = "Litigieux"
-            else:
+            # Le statut devient "En règle" SEULEMENT si montant payé >= montant souscrit
+            # Sinon, le statut reste "En attente" par défaut
+            if float(montant_paye) >= float(montant_souscrit):
                 statut = "En règle"
+            else:
+                statut = "En attente"
 
             # Mettre à jour le paiement
             cursor.execute(

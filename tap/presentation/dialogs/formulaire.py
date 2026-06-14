@@ -4,26 +4,36 @@ import customtkinter as ctk
 from tkinter import messagebox
 
 from tap.config.theme import C
-from tap.core.date_utils import parse_mois_saisie
+from tap.core.validators import ValidationError, validate_name, validate_phone, validate_amount
 from tap.infrastructure.database import inserer_souscription, modifier_souscription
 
-# ── Helpers de validation ──────────────────────────────────────────────────────
+
+# ── Helpers de validation compatibles avec l'interface existante ────────────────
 
 def _is_valid_name(v: str) -> bool:
-    return len(v.strip()) >= 2
+    """Wrapper de validation pour les noms (compatible avec l'interface existante)."""
+    try:
+        validate_name(v)
+        return True
+    except ValidationError:
+        return False
+
 
 def _is_valid_phone(v: str) -> bool:
-    digits = ''.join(c for c in v if c.isdigit())
-    return len(digits) >= 7
+    """Wrapper de validation pour les téléphones (compatible avec l'interface existante)."""
+    try:
+        validate_phone(v)
+        return True
+    except ValidationError:
+        return False
 
-def _is_valid_month(v: str) -> bool:
-    """Valide une date au format AAAA-MM-JJ ou AAAA-MM."""
-    return parse_mois_saisie(v) is not None
 
 def _is_valid_amount(v: str) -> bool:
+    """Wrapper de validation pour les montants (compatible avec l'interface existante)."""
     try:
-        return float(v.strip()) > 0
-    except ValueError:
+        validate_amount(v)
+        return True
+    except ValidationError:
         return False
 
 
@@ -212,19 +222,23 @@ class FormulaireSouscription(ctk.CTkToplevel):
                      font=ctk.CTkFont(size=11, weight='bold'),
                      text_color=C['text_hi']).pack(anchor='w', pady=(0, 6))
 
-        # Générer la liste des mois (Septembre 2025 à Décembre 2029)
+        # Générer la liste des mois de manière dynamique (année courante à +5 ans)
         mois_liste = []
-        for annee in range(2025, 2030):  # 2025 à 2029
+        current_year = date.today().year
+        current_month = date.today().month
+        
+        for annee in range(current_year, current_year + 6):  # Année courante à +5 ans
             for mois in range(1, 13):
-                # Commencer à septembre 2025
-                if annee == 2025 and mois < 9:
+                # Commencer à partir du mois courant pour l'année courante
+                if annee == current_year and mois < current_month:
                     continue
                 mois_date = date(annee, mois, 1)
                 nom_mois = mois_date.strftime('%B %Y').capitalize()
                 valeur_mois = mois_date.strftime('%Y-%m-%d')
                 mois_liste.append(f"{nom_mois} ({valeur_mois})")
 
-        default_mois = date(2025, 9, 1).strftime('%B %Y (%Y-%m-%d)').capitalize()
+        # Définir le mois par défaut comme le mois courant
+        default_mois = date(current_year, current_month, 1).strftime('%B %Y (%Y-%m-%d)').capitalize()
         self.combo_mois = self._combo(col_mois, mois_liste, default_mois)
         self.combo_mois.pack(fill='x')
 
@@ -236,8 +250,8 @@ class FormulaireSouscription(ctk.CTkToplevel):
         row3 = ctk.CTkFrame(form, fg_color='transparent')
         row3.pack(fill='x', pady=(0, 12))
 
-        # Montant payé (acompte optionnel)
-        self.field_montant_paye = ValidatedField(row3, 'Montant payé (optionnel)', 'Laisser vide pour paiement complet',
+        # Montant payé (optionnel)
+        self.field_montant_paye = ValidatedField(row3, 'Montant payé (optionnel)', 'Laisser vide = En attente, Entrer montant = En règle si complet',
                                               validator=_is_valid_amount, required=False)
         self.field_montant_paye.pack(side='left', fill='both', expand=True, padx=(0, 8))
 
@@ -380,15 +394,16 @@ class FormulaireSouscription(ctk.CTkToplevel):
         if '(' in mois_selection and ')' in mois_selection:
             mois = mois_selection.split('(')[1].split(')')[0]
         else:
-            mois = date(2025, 9, 1).strftime('%Y-%m-%d')
+            # Utiliser le mois courant comme fallback
+            mois = date.today().strftime('%Y-%m-%d')
 
-        # Récupérer le montant souscrit
+        # Récupérer le montant souscrit (obligatoire)
         montant_souscrit = self.field_montant_souscrit.get()
 
         # Récupérer le montant payé (optionnel)
         montant_paye = self.field_montant_paye.get()
         if not montant_paye:
-            montant_paye = None
+            montant_paye = None  # None signifie pas de paiement (statut reste "En attente")
 
         # Désactiver le bouton le temps de l'insertion
         self.btn_save.configure(state='disabled', text='Enregistrement…')

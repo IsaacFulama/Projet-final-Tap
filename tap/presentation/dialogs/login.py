@@ -1,21 +1,26 @@
 import customtkinter as ctk
 from tkinter import messagebox
+from typing import Optional
 
 from tap.config.theme import C
+from tap.core.auth import authenticate_user
 
 
 class LoginDialog(ctk.CTk):
-    def __init__(self, callback_success):
+    """Dialogue de connexion sécurisée avec gestion des tentatives."""
+    
+    def __init__(self, parent: Optional[ctk.CTk] = None):
         super().__init__()
-        self.callback_success = callback_success
+        self.parent = parent
         self.authenticated = False
         self.password_visible = False
+        self.attempts_remaining = 5
         
         self.title('TAP · Gestion des Loyers')
         self._set_initial_geometry()
         self.configure(fg_color=C['bg_deep'])
         self.resizable(True, True)
-        self.minsize(380, 340)
+        self.minsize(320, 300)  # Réduit pour supporter les petits écrans
         
         # Centrer la fenêtre
         self.center_window()
@@ -25,7 +30,8 @@ class LoginDialog(ctk.CTk):
         
         self._build_ui()
     
-    def center_window(self):
+    def center_window(self) -> None:
+        """Centre la fenêtre sur l'écran."""
         self.update_idletasks()
         width = self.winfo_width()
         height = self.winfo_height()
@@ -33,17 +39,39 @@ class LoginDialog(ctk.CTk):
         y = (self.winfo_screenheight() // 2) - (height // 2)
         self.geometry(f'{width}x{height}+{x}+{y}')
 
-    def _set_initial_geometry(self):
+    def _set_initial_geometry(self) -> None:
+        """Définit la géométrie initiale de la fenêtre de manière responsive."""
         self.update_idletasks()
         screen_width = self.winfo_screenwidth()
         screen_height = self.winfo_screenheight()
-        width = min(max(int(screen_width * 0.34), 420), 560)
-        height = min(max(int(screen_height * 0.55), 380), 520)
+        
+        # Dimensions adaptatives pour tous types d'écrans
+        # Écrans petits : 1024x768 minimum
+        # Écrans moyens : 1366x768
+        # Écrans larges : 1920x1080 et plus
+        if screen_width < 1024:
+            # Écran très petit (tablette, netbook)
+            width = min(screen_width - 40, 380)
+            height = min(screen_height - 40, 340)
+        elif screen_width < 1366:
+            # Écran petit
+            width = min(int(screen_width * 0.45), 420)
+            height = min(int(screen_height * 0.60), 380)
+        else:
+            # Écran standard ou large
+            width = min(int(screen_width * 0.34), 560)
+            height = min(int(screen_height * 0.55), 520)
+        
+        # S'assurer que les dimensions sont raisonnables
+        width = max(width, 350)
+        height = max(height, 320)
+        
         x = (screen_width - width) // 2
         y = (screen_height - height) // 2
         self.geometry(f'{width}x{height}+{x}+{y}')
     
-    def _build_ui(self):
+    def _build_ui(self) -> None:
+        """Construit l'interface utilisateur du dialogue de connexion."""
         card = ctk.CTkFrame(self, fg_color=C['bg_card'], corner_radius=16,
                             border_width=1, border_color=C['border'])
         card.pack(fill='both', expand=True, padx=30, pady=30)
@@ -129,20 +157,39 @@ class LoginDialog(ctk.CTk):
                      text_color=C['text_lo']).pack(pady=12)
         self.after(100, self.entry_username.focus)
 
-    def _toggle_password(self):
+    def _toggle_password(self) -> None:
+        """Bascule la visibilité du mot de passe."""
         self.password_visible = not self.password_visible
         self.entry_password.configure(show='' if self.password_visible else '•')
         self.btn_toggle_password.configure(text='Masquer' if self.password_visible else 'Afficher')
     
-    def connexion(self):
+    def connexion(self) -> None:
+        """Tente d'authentifier l'utilisateur avec les identifiants fournis."""
         username = self.entry_username.get().strip()
         password = self.entry_password.get().strip()
         
-        # Vérification des identifiants
-        if username == 'TAPADM' and password == 'TAPADM':
+        if not username or not password:
+            messagebox.showerror('Erreur', 'Veuillez remplir tous les champs')
+            return
+        
+        # Utiliser le système d'authentification sécurisé
+        success, message = authenticate_user(username, password)
+        
+        if success:
             self.authenticated = True
             self.quit()  # Quitter la boucle principale au lieu de destroy
         else:
-            messagebox.showerror('Erreur', 'Nom d\'utilisateur ou mot de passe incorrect')
+            self.attempts_remaining -= 1
+            messagebox.showerror('Erreur', f'{message}\nTentatives restantes: {self.attempts_remaining}')
             self.entry_password.delete(0, 'end')
             self.entry_password.focus()
+            
+            # Désactiver le bouton si trop de tentatives
+            if self.attempts_remaining <= 0:
+                self.btn_login.configure(state='disabled', text='Trop de tentatives')
+                self.after(30000, self._reenable_login_button)  # Réactiver après 30 secondes
+    
+    def _reenable_login_button(self) -> None:
+        """Réactive le bouton de connexion après un délai."""
+        self.btn_login.configure(state='normal', text='  Se connecter  ')
+        self.attempts_remaining = 5

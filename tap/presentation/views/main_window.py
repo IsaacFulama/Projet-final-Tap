@@ -110,13 +110,20 @@ class HistoriqueDialog(ctk.CTkToplevel):
         self.update_idletasks()
         screen_w = self.winfo_screenwidth()
         screen_h = self.winfo_screenheight()
-        width = min(max(700, int(screen_w * 0.45)), 900)
-        height = min(max(500, int(screen_h * 0.6)), 700)
+        
+        # Dimensions adaptatives
+        if screen_w < 1024:
+            width = screen_w - 40
+            height = screen_h - 60
+        else:
+            width = min(max(600, int(screen_w * 0.45)), 800)
+            height = min(max(450, int(screen_h * 0.6)), 650)
+        
         x = (screen_w - width) // 2
         y = (screen_h - height) // 2
         
         self.geometry(f"{width}x{height}+{x}+{y}")
-        self.minsize(560, 400)
+        self.minsize(500, 350)  # Réduit pour petits écrans
         self.configure(fg_color=C["bg_deep"])
         self.transient(parent)
         self.grab_set()
@@ -375,7 +382,18 @@ class HistoriqueDialog(ctk.CTkToplevel):
         # Créer un sous-dialogue pour le graphique
         chart_dialog = ctk.CTkToplevel(self)
         chart_dialog.title(f"Évolution - {self.nom} {self.prenom}")
-        chart_dialog.geometry("700x450")
+        
+        # Dimensions adaptatives
+        screen_w = self.winfo_screenwidth()
+        screen_h = self.winfo_screenheight()
+        if screen_w < 1024:
+            chart_width = screen_w - 60
+            chart_height = screen_h - 80
+        else:
+            chart_width = min(700, screen_w - 100)
+            chart_height = min(450, screen_h - 100)
+        
+        chart_dialog.geometry(f"{chart_width}x{chart_height}")
         chart_dialog.configure(fg_color=C["bg_deep"])
         chart_dialog.transient(self)
         chart_dialog.grab_set()
@@ -464,7 +482,7 @@ class AppGestionLoyers(ctk.CTk):
         self.configure(fg_color=C["bg_deep"])
         self.title("TAP · Gestion des Loyers")
         self._set_initial_geometry()
-        self.minsize(820, 620)
+        self.minsize(700, 500)  # Réduit pour supporter les petits écrans
         
         # Cache des données
         self._all_data: list = []
@@ -918,8 +936,25 @@ class AppGestionLoyers(ctk.CTk):
         self.update_idletasks()
         screen_width = self.winfo_screenwidth()
         screen_height = self.winfo_screenheight()
-        width = min(max(int(screen_width * 0.92), 960), screen_width)
-        height = min(max(int(screen_height * 0.9), 680), screen_height)
+        
+        # Dimensions adaptatives pour tous types d'écrans
+        if screen_width < 1024:
+            # Écran très petit
+            width = screen_width - 20
+            height = screen_height - 40
+        elif screen_width < 1366:
+            # Écran petit
+            width = min(int(screen_width * 0.95), 900)
+            height = min(int(screen_height * 0.85), 650)
+        else:
+            # Écran standard ou large
+            width = min(max(int(screen_width * 0.92), 960), screen_width)
+            height = min(max(int(screen_height * 0.9), 680), screen_height)
+        
+        # S'assurer que les dimensions sont raisonnables
+        width = max(width, 800)
+        height = max(height, 600)
+        
         x = max((screen_width - width) // 2, 0)
         y = max((screen_height - height) // 2, 0)
         self.geometry(f"{width}x{height}+{x}+{y}")
