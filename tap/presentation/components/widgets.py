@@ -20,14 +20,28 @@ class StatCard(ctk.CTkFrame):
         self.lbl_sub.pack(anchor="w")
         bottom = ctk.CTkFrame(inner, fg_color="transparent")
         bottom.pack(fill="x", anchor="w", pady=(4, 0))
-        ctk.CTkLabel(bottom, text=icon, font=ctk.CTkFont(size=12),
-                     text_color=C["text_lo"]).pack(side="left", padx=(0, 4))
-        ctk.CTkLabel(bottom, text=label, font=ctk.CTkFont(size=11),
-                     text_color=C["text_lo"]).pack(side="left")
+        self.lbl_icon = ctk.CTkLabel(bottom, text=icon, font=ctk.CTkFont(size=12),
+                                     text_color=C["text_lo"])
+        self.lbl_icon.pack(side="left", padx=(0, 4))
+        self.lbl_label = ctk.CTkLabel(bottom, text=label, font=ctk.CTkFont(size=11),
+                                      text_color=C["text_lo"])
+        self.lbl_label.pack(side="left")
 
     def update(self, value, sub: str = ""):
         self.lbl_value.configure(text=str(value))
         self.lbl_sub.configure(text=sub)
+
+    def set_density(self, value_size: int | None = None, label_size: int | None = None,
+                    sub_size: int | None = None, icon_size: int | None = None):
+        """Ajuste la densité typographique de la carte."""
+        if value_size is not None:
+            self.lbl_value.configure(font=ctk.CTkFont(family="Georgia", size=value_size, weight="bold"))
+        if sub_size is not None:
+            self.lbl_sub.configure(font=ctk.CTkFont(size=sub_size))
+        if label_size is not None:
+            self.lbl_label.configure(font=ctk.CTkFont(size=label_size))
+        if icon_size is not None:
+            self.lbl_icon.configure(font=ctk.CTkFont(size=icon_size))
 
 
 class SidebarButton(ctk.CTkButton):

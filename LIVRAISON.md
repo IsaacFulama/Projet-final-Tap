@@ -42,6 +42,7 @@
 - **Export PDF** : Export filtré avec totaux par devise
 - **Dashboard** : Analyse financière avec graphiques
 - **Filtres** : Par nom, statut, statut souscription, devise, mois
+- **Interface revue** : fond blanc professionnel, texte plus lisible et tableau des enregistrements agrandi
 
 ## Support technique
 
@@ -55,5 +56,5 @@ Pour toute question, consulter le fichier `INSTALLATION.md` ou contacter le supp
 - Le fichier `config.json` doit être dans le même dossier que l'exécutable
 
 ## Version
-- Version : 3.2
-- Date de livraison : 12 juin 2026
+- Version : 3.6
+- Date de livraison : 15 juin 2026

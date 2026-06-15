@@ -4,6 +4,7 @@ import customtkinter as ctk
 from tkinter import messagebox
 
 from tap.config.theme import C
+from tap.config.responsive import clamp_window_geometry, detect_screen_profile
 from tap.core.validators import ValidationError, validate_name, validate_phone, validate_amount
 from tap.infrastructure.database import inserer_souscription, modifier_souscription
 
@@ -135,12 +136,17 @@ class FormulaireSouscription(ctk.CTkToplevel):
         self.paiement_id = paiement_id
         self.mode_edition = paiement_id is not None
         self.donnees_initiales = donnees_initiales
+        self._screen = detect_screen_profile()
+        self._compact_mode = self._screen.width < 1100
 
         title = 'TAP · Modifier Paiement' if self.mode_edition else 'TAP · Nouveau Paiement'
         self.title(title)
         self._set_initial_geometry()
         self.resizable(True, True)
-        self.minsize(420, 480)
+        self.minsize(
+            max(380, min(560, self._screen.width - 20)),
+            max(440, min(580, self._screen.height - 20)),
+        )
         self.configure(fg_color=C['bg_deep'])
 
         # Modalité correcte
@@ -161,10 +167,30 @@ class FormulaireSouscription(ctk.CTkToplevel):
 
     def _set_initial_geometry(self):
         self.update_idletasks()
-        screen_width = self.winfo_screenwidth()
-        screen_height = self.winfo_screenheight()
-        width = min(max(int(screen_width * 0.42), 520), 760)
-        height = min(max(int(screen_height * 0.8), 560), 780)
+        screen_width = self._screen.width
+        screen_height = self._screen.height
+
+        if min(screen_width, screen_height) < 900:
+            width_ratio, height_ratio = 0.94, 0.88
+            min_width, min_height = 420, 480
+        elif screen_width < 1366:
+            width_ratio, height_ratio = 0.52, 0.78
+            min_width, min_height = 480, 540
+        elif screen_width < 1920:
+            width_ratio, height_ratio = 0.42, 0.80
+            min_width, min_height = 520, 560
+        else:
+            width_ratio, height_ratio = 0.34, 0.76
+            min_width, min_height = 560, 580
+
+        width, height = clamp_window_geometry(
+            screen_width,
+            screen_height,
+            width_ratio=width_ratio,
+            height_ratio=height_ratio,
+            min_width=min_width,
+            min_height=min_height,
+        )
         x = (screen_width - width) // 2
         y = (screen_height - height) // 2
         self.geometry(f'{width}x{height}+{x}+{y}')
@@ -174,25 +200,27 @@ class FormulaireSouscription(ctk.CTkToplevel):
     def _build_ui(self):
         card = ctk.CTkFrame(self, fg_color=C['bg_card'], corner_radius=16,
                             border_width=1, border_color=C['border'])
-        card.pack(fill='both', expand=True, padx=20, pady=20)
+        card.pack(fill='both', expand=True, padx=16 if self._compact_mode else 20,
+                  pady=16 if self._compact_mode else 20)
 
         # ─ Header ─
         header = ctk.CTkFrame(card, fg_color='transparent')
-        header.pack(fill='x', padx=24, pady=(24, 16))
+        header.pack(fill='x', padx=20 if self._compact_mode else 24,
+                    pady=(20 if self._compact_mode else 24, 16))
 
         header_text = 'Modifier Paiement' if self.mode_edition else 'Nouveau Paiement'
         ctk.CTkLabel(header, text=header_text,
-                     font=ctk.CTkFont(family='Georgia', size=22, weight='bold'),
+                     font=ctk.CTkFont(family='Georgia', size=20 if self._compact_mode else 22, weight='bold'),
                      text_color=C['accent']).pack(anchor='w')
         ctk.CTkLabel(header, text='Tous les champs marqués * sont obligatoires',
                      font=ctk.CTkFont(size=11),
                      text_color=C['text_lo']).pack(anchor='w', pady=(4, 0))
 
-        ctk.CTkFrame(card, height=1, fg_color=C['border']).pack(fill='x', padx=24)
+        ctk.CTkFrame(card, height=1, fg_color=C['border']).pack(fill='x', padx=20 if self._compact_mode else 24)
 
         # ─ Champs ─
         form = ctk.CTkScrollableFrame(card, fg_color='transparent')
-        form.pack(fill='both', expand=True, padx=24, pady=(16, 0))
+        form.pack(fill='both', expand=True, padx=20 if self._compact_mode else 24, pady=(16, 0))
 
         # Ligne 1 : Nom / Prénom
         row1 = ctk.CTkFrame(form, fg_color='transparent')
@@ -200,11 +228,14 @@ class FormulaireSouscription(ctk.CTkToplevel):
 
         self.field_nom = ValidatedField(row1, 'Nom', 'Dupont',
                                         validator=_is_valid_name)
-        self.field_nom.pack(side='left', fill='both', expand=True, padx=(0, 8))
-
         self.field_prenom = ValidatedField(row1, 'Prénom', 'Jean',
                                            validator=_is_valid_name)
-        self.field_prenom.pack(side='left', fill='both', expand=True, padx=(8, 0))
+        if self._compact_mode:
+            self.field_nom.pack(fill='x', pady=(0, 10))
+            self.field_prenom.pack(fill='x')
+        else:
+            self.field_nom.pack(side='left', fill='both', expand=True, padx=(0, 8))
+            self.field_prenom.pack(side='left', fill='both', expand=True, padx=(8, 0))
 
         # Téléphone (optionnel)
         self.field_telephone = ValidatedField(form, 'Téléphone (optionnel)', '+243 XXX XXX XXX',
@@ -217,7 +248,10 @@ class FormulaireSouscription(ctk.CTkToplevel):
 
         # Sélecteur de mois rapide (Septembre 2025 à 2029)
         col_mois = ctk.CTkFrame(row2, fg_color='transparent')
-        col_mois.pack(side='left', fill='both', expand=True, padx=(0, 8))
+        if self._compact_mode:
+            col_mois.pack(fill='x', pady=(0, 10))
+        else:
+            col_mois.pack(side='left', fill='both', expand=True, padx=(0, 8))
         ctk.CTkLabel(col_mois, text='Mois',
                      font=ctk.CTkFont(size=11, weight='bold'),
                      text_color=C['text_hi']).pack(anchor='w', pady=(0, 6))
@@ -244,7 +278,10 @@ class FormulaireSouscription(ctk.CTkToplevel):
 
         self.field_montant_souscrit = ValidatedField(row2, 'Montant souscrit', '0.00',
                                                      validator=_is_valid_amount)
-        self.field_montant_souscrit.pack(side='left', fill='both', expand=True, padx=(0, 8))
+        if self._compact_mode:
+            self.field_montant_souscrit.pack(fill='x')
+        else:
+            self.field_montant_souscrit.pack(side='left', fill='both', expand=True, padx=(0, 8))
 
         # Ligne 3 : Montant payé
         row3 = ctk.CTkFrame(form, fg_color='transparent')
@@ -253,14 +290,17 @@ class FormulaireSouscription(ctk.CTkToplevel):
         # Montant payé (optionnel)
         self.field_montant_paye = ValidatedField(row3, 'Montant payé (optionnel)', 'Laisser vide = En attente, Entrer montant = En règle si complet',
                                               validator=_is_valid_amount, required=False)
-        self.field_montant_paye.pack(side='left', fill='both', expand=True, padx=(0, 8))
+        self.field_montant_paye.pack(fill='x')
 
         # Ligne 4 : Devise
         row4 = ctk.CTkFrame(form, fg_color='transparent')
         row4.pack(fill='x', pady=(0, 16))
 
         col_devise = ctk.CTkFrame(row4, fg_color='transparent')
-        col_devise.pack(side='left', fill='both', expand=True)
+        if self._compact_mode:
+            col_devise.pack(fill='x', pady=(0, 10))
+        else:
+            col_devise.pack(side='left', fill='both', expand=True)
         ctk.CTkLabel(col_devise, text='Devise',
                      font=ctk.CTkFont(size=11, weight='bold'),
                      text_color=C['text_hi']).pack(anchor='w', pady=(0, 6))
@@ -268,7 +308,10 @@ class FormulaireSouscription(ctk.CTkToplevel):
         self.combo_devise.pack(fill='x')
 
         col_statut_souscription = ctk.CTkFrame(row4, fg_color='transparent')
-        col_statut_souscription.pack(side='left', fill='both', expand=True, padx=(12, 0))
+        if self._compact_mode:
+            col_statut_souscription.pack(fill='x')
+        else:
+            col_statut_souscription.pack(side='left', fill='both', expand=True, padx=(12, 0))
         ctk.CTkLabel(col_statut_souscription, text='Statut souscription',
                      font=ctk.CTkFont(size=11, weight='bold'),
                      text_color=C['text_hi']).pack(anchor='w', pady=(0, 6))
@@ -288,17 +331,19 @@ class FormulaireSouscription(ctk.CTkToplevel):
         self.field_montant_paye.entry.bind('<Return>', lambda _: self._enregistrer())
 
         # ─ Boutons ─
-        ctk.CTkFrame(card, height=1, fg_color=C['border']).pack(fill='x', padx=24)
+        ctk.CTkFrame(card, height=1, fg_color=C['border']).pack(fill='x', padx=20 if self._compact_mode else 24)
 
         btn_row = ctk.CTkFrame(card, fg_color='transparent')
-        btn_row.pack(fill='x', padx=24, pady=16)
+        btn_row.pack(fill='x', padx=20 if self._compact_mode else 24, pady=16)
 
         ctk.CTkButton(btn_row, text='Annuler', width=120, height=40,
                       fg_color='transparent',
                       border_color=C['border'], border_width=1,
                       text_color=C['text_lo'],
                       hover_color=C['bg_section'],
-                      command=self.destroy).pack(side='left')
+                      command=self.destroy).pack(side='top' if self._compact_mode else 'left',
+                                                fill='x' if self._compact_mode else 'none',
+                                                pady=(0, 8) if self._compact_mode else 0)
 
         self.btn_save = ctk.CTkButton(
             btn_row, text='  Enregistrer  ', height=40,
@@ -308,7 +353,8 @@ class FormulaireSouscription(ctk.CTkToplevel):
             corner_radius=8,
             command=self._enregistrer
         )
-        self.btn_save.pack(side='right')
+        self.btn_save.pack(side='top' if self._compact_mode else 'right',
+                           fill='x' if self._compact_mode else 'none')
 
     def _remplir_champs(self):
         """Pré-remplit les champs avec les données existantes."""

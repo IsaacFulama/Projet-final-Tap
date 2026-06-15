@@ -8,7 +8,13 @@ import time
 import csv
 
 from tap.config.theme import C, MPL, STATUS_COLORS
+from tap.config.responsive import (
+    build_layout_profile,
+    clamp_window_geometry,
+    detect_screen_profile,
+)
 from tap.core.utils import month_sort_key
+from tap.core.auto_status_updater import executer_mise_a_jour_automatique
 from tap.infrastructure.database import (
     ajouter_paiement_complementaire,
     get_historique_locataire,
@@ -21,7 +27,7 @@ from tap.presentation.components.widgets import SidebarButton, StatCard
 from tap.presentation.dialogs.export_pdf import ExportPDFDialog
 from tap.presentation.dialogs.formulaire import FormulaireSouscription
 
-ctk.set_appearance_mode("Dark")
+ctk.set_appearance_mode("Light")
 ctk.set_default_color_theme("blue")
 
 
@@ -104,6 +110,8 @@ class HistoriqueDialog(ctk.CTkToplevel):
     """Dialogue d'historique avec tri et export"""
     def __init__(self, parent, nom, prenom, paiements):
         super().__init__(parent)
+        self._screen = detect_screen_profile()
+        self._compact_mode = self._screen.width < 1100
         self.title(f"Historique - {nom} {prenom}")
         
         # Géométrie responsive
@@ -112,18 +120,36 @@ class HistoriqueDialog(ctk.CTkToplevel):
         screen_h = self.winfo_screenheight()
         
         # Dimensions adaptatives
-        if screen_w < 1024:
-            width = screen_w - 40
-            height = screen_h - 60
+        if min(screen_w, screen_h) < 900:
+            width_ratio, height_ratio = 0.94, 0.88
+            min_width, min_height = 520, 380
+        elif screen_w < 1366:
+            width_ratio, height_ratio = 0.54, 0.64
+            min_width, min_height = 560, 420
+        elif screen_w < 1920:
+            width_ratio, height_ratio = 0.46, 0.62
+            min_width, min_height = 600, 450
         else:
-            width = min(max(600, int(screen_w * 0.45)), 800)
-            height = min(max(450, int(screen_h * 0.6)), 650)
+            width_ratio, height_ratio = 0.40, 0.58
+            min_width, min_height = 640, 480
+
+        width, height = clamp_window_geometry(
+            screen_w,
+            screen_h,
+            width_ratio=width_ratio,
+            height_ratio=height_ratio,
+            min_width=min_width,
+            min_height=min_height,
+        )
         
         x = (screen_w - width) // 2
         y = (screen_h - height) // 2
         
         self.geometry(f"{width}x{height}+{x}+{y}")
-        self.minsize(500, 350)  # Réduit pour petits écrans
+        self.minsize(
+            max(420, min(640, screen_w - 20)),
+            max(320, min(480, screen_h - 20)),
+        )
         self.configure(fg_color=C["bg_deep"])
         self.transient(parent)
         self.grab_set()
@@ -145,55 +171,75 @@ class HistoriqueDialog(ctk.CTkToplevel):
         # Frame principal
         frame = ctk.CTkFrame(self, fg_color=C["bg_card"], corner_radius=16,
                               border_width=1, border_color=C["border"])
-        frame.pack(fill="both", expand=True, padx=20, pady=20)
-        
+        frame.pack(fill="both", expand=True, padx=14 if self._compact_mode else 20,
+                   pady=14 if self._compact_mode else 20)
+
         # Header
         header = ctk.CTkFrame(frame, fg_color="transparent")
-        header.pack(fill="x", padx=24, pady=(20, 16))
-        
+        header.pack(fill="x", padx=18 if self._compact_mode else 24,
+                    pady=(18 if self._compact_mode else 20, 14 if self._compact_mode else 16))
+
         ctk.CTkLabel(header, text="📊 Historique des paiements",
-                     font=ctk.CTkFont(family="Georgia", size=20, weight="bold"),
+                     font=ctk.CTkFont(family="Georgia", size=18 if self._compact_mode else 20, weight="bold"),
                      text_color=C["accent"]).pack(anchor="w")
-        
+
         ctk.CTkLabel(header, text=f"{self.nom} {self.prenom}",
-                     font=ctk.CTkFont(size=14, weight="bold"),
+                     font=ctk.CTkFont(size=12 if self._compact_mode else 14, weight="bold"),
                      text_color=C["text_hi"]).pack(anchor="w", pady=(8, 0))
-        
+
         ctk.CTkFrame(frame, height=1, fg_color=C["border"]).pack(fill="x", padx=0)
-        
+
         # Actions
         actions_frame = ctk.CTkFrame(frame, fg_color="transparent")
-        actions_frame.pack(fill="x", padx=24, pady=(12, 0))
-        
-        ctk.CTkButton(actions_frame, text="📄 Exporter CSV",
-                      fg_color=C["bg_section"], hover_color=C["border"],
-                      text_color=C["text_hi"], height=32, width=140,
-                      corner_radius=6,
-                      command=self._export_csv).pack(side="left", padx=(0, 8))
-        
-        ctk.CTkButton(actions_frame, text="📊 Graphique",
-                      fg_color=C["bg_section"], hover_color=C["border"],
-                      text_color=C["text_hi"], height=32, width=120,
-                      corner_radius=6,
-                      command=self._show_evolution_chart).pack(side="left", padx=(0, 8))
-        
+        actions_frame.pack(fill="x", padx=18 if self._compact_mode else 24,
+                           pady=(12, 0))
+
+        if self._compact_mode:
+            for col in range(3):
+                actions_frame.columnconfigure(col, weight=1, uniform="hist_actions")
+
+        csv_btn = ctk.CTkButton(actions_frame, text="📄 Exporter CSV",
+                                fg_color=C["bg_section"], hover_color=C["border"],
+                                text_color=C["text_hi"], height=32,
+                                width=118 if self._compact_mode else 140,
+                                corner_radius=6,
+                                command=self._export_csv)
+
+        chart_btn = ctk.CTkButton(actions_frame, text="📊 Graphique",
+                                  fg_color=C["bg_section"], hover_color=C["border"],
+                                  text_color=C["text_hi"], height=32,
+                                  width=118 if self._compact_mode else 120,
+                                  corner_radius=6,
+                                  command=self._show_evolution_chart)
+
+        if self._compact_mode:
+            csv_btn.grid(row=0, column=0, sticky="ew", padx=(0, 6), pady=(0, 8))
+            chart_btn.grid(row=0, column=1, sticky="ew", padx=(6, 0), pady=(0, 8))
+        else:
+            csv_btn.pack(side="left", padx=(0, 8))
+            chart_btn.pack(side="left", padx=(0, 8))
+
         # Stats
         self.stats_frame = ctk.CTkFrame(frame, fg_color=C["bg_section"], corner_radius=8)
-        self.stats_frame.pack(fill="x", padx=24, pady=12)
+        self.stats_frame.pack(fill="x", padx=18 if self._compact_mode else 24, pady=12)
         self._update_stats()
-        
+
         # Tableau
         self.tbl_frame = ctk.CTkFrame(frame, fg_color="transparent")
-        self.tbl_frame.pack(fill="both", expand=True, padx=24, pady=(0, 16))
+        self.tbl_frame.pack(fill="both", expand=True, padx=18 if self._compact_mode else 24, pady=(0, 16))
         self._build_table()
-        
+
         # Bouton fermer
         ctk.CTkButton(frame, text="Fermer", width=120, height=35,
                       fg_color=C["accent"], hover_color=C["accent_dim"],
                       text_color="#000000",
                       font=ctk.CTkFont(size=12, weight="bold"),
                       corner_radius=6,
-                      command=self.destroy).pack(pady=(0, 20))
+                      command=self.destroy).pack(
+                          fill="x" if self._compact_mode else "none",
+                          padx=18 if self._compact_mode else 0,
+                          pady=(0, 16 if self._compact_mode else 20)
+                      )
         
     def _update_stats(self):
         """Met à jour les statistiques"""
@@ -201,7 +247,14 @@ class HistoriqueDialog(ctk.CTkToplevel):
             widget.destroy()
 
         stats_row = ctk.CTkFrame(self.stats_frame, fg_color="transparent")
-        stats_row.pack(fill="x", padx=16, pady=12)
+        stats_row.pack(fill="x", padx=12, pady=12)
+
+        if self._compact_mode:
+            for col in range(2):
+                stats_row.columnconfigure(col, weight=1, uniform="hist")
+        else:
+            for col in range(7):
+                stats_row.columnconfigure(col, weight=1, uniform="hist")
 
         total_montant = 0
         total_paye = 0
@@ -235,20 +288,31 @@ class HistoriqueDialog(ctk.CTkToplevel):
                 elif p[8] == "Partiel":
                     partiels += 1
 
-        self._stat_label(stats_row, f"Total: {len(self.paiements)}", C["text_hi"])
-        self._stat_label(stats_row, f"En règle: {payes}", C["green"])
-        self._stat_label(stats_row, f"Litigieux: {litigieux}", C["orange"])
-        self._stat_label(stats_row, f"Complet: {complets}", C["green"])
-        self._stat_label(stats_row, f"Partiel: {partiels}", C["orange"])
-        self._stat_label(stats_row, f"Total payé: {total_paye:,.0f}", C["accent"])
-        self._stat_label(stats_row, f"Reste: {total_reste:,.0f}", C["red"])
+        stats = [
+            (f"Total: {len(self.paiements)}", C["text_hi"]),
+            (f"En règle: {payes}", C["green"]),
+            (f"Litigieux: {litigieux}", C["orange"]),
+            (f"Complet: {complets}", C["green"]),
+            (f"Partiel: {partiels}", C["orange"]),
+            (f"Total payé: {total_paye:,.0f}", C["accent"]),
+            (f"Reste: {total_reste:,.0f}", C["red"]),
+        ]
+
+        if self._compact_mode:
+            positions = [(i // 2, i % 2) for i in range(len(stats))]
+        else:
+            positions = [(0, i) for i in range(len(stats))]
+
+        for (text, color), (row, col) in zip(stats, positions):
+            self._stat_label(stats_row, text, color, row=row, column=col)
         
     @staticmethod
-    def _stat_label(parent, text, color):
+    def _stat_label(parent, text, color, row=0, column=0):
         """Crée un label de statistique"""
-        ctk.CTkLabel(parent, text=text,
-                     font=ctk.CTkFont(size=12, weight="bold"),
-                     text_color=color).pack(side="left", padx=(0, 24))
+        label = ctk.CTkLabel(parent, text=text,
+                             font=ctk.CTkFont(size=11, weight="bold"),
+                             text_color=color)
+        label.grid(row=row, column=column, sticky="w", padx=(0, 18), pady=4)
         
     def _build_table(self):
         """Construit le tableau des paiements"""
@@ -256,17 +320,32 @@ class HistoriqueDialog(ctk.CTkToplevel):
         self.tree = ttk.Treeview(self.tbl_frame, columns=cols,
                                  show="headings", style="TAP.Treeview")
 
-        widths = {"Mois": 100, "Montant Total": 100, "Montant Payé": 100, "Reste": 90,
-                  "Devise": 70, "Statut Souscription": 130, "Statut": 100, "Statut Paiement": 100}
+        if self._compact_mode:
+            widths = {"Mois": 96, "Montant Total": 92, "Montant Payé": 92, "Reste": 82,
+                      "Devise": 70, "Statut Souscription": 112, "Statut": 88, "Statut Paiement": 100}
+        else:
+            widths = {"Mois": 120, "Montant Total": 120, "Montant Payé": 120, "Reste": 110,
+                      "Devise": 85, "Statut Souscription": 140, "Statut": 110, "Statut Paiement": 120}
+        anchors = {
+            "Mois": "center",
+            "Montant Total": "e",
+            "Montant Payé": "e",
+            "Reste": "e",
+            "Devise": "center",
+            "Statut Souscription": "center",
+            "Statut": "center",
+            "Statut Paiement": "center",
+        }
 
         for col in cols:
             self.tree.heading(
-                col, text=col.upper(),
+                col, text=col.upper(), anchor=anchors.get(col, "center"),
                 command=lambda c=col: self._sort_by_column(c)
             )
             self.tree.column(col, width=widths.get(col, 100),
-                           anchor="e" if "Montant" in col or col == "Reste" else "center",
-                           minwidth=60)
+                           anchor=anchors.get(col, "center"),
+                           stretch=col in {"Mois", "Statut Souscription", "Statut", "Statut Paiement"},
+                           minwidth=70)
 
         # Remplir
         for i, paiement in enumerate(self.paiements):
@@ -326,7 +405,9 @@ class HistoriqueDialog(ctk.CTkToplevel):
                 for item in self.tree.get_children("")]
         
         # Trier selon le type
-        if column == "Montant":
+        if column == "Mois":
+            items.sort(key=lambda x: month_sort_key(x[0]), reverse=self._sort_reverse)
+        elif column in {"Montant Total", "Montant Payé", "Reste"}:
             try:
                 items.sort(key=lambda x: float(x[0].replace(",", ".").replace(" ", "")), 
                           reverse=self._sort_reverse)
@@ -360,7 +441,7 @@ class HistoriqueDialog(ctk.CTkToplevel):
 
         try:
             with open(filename, 'w', newline='', encoding='utf-8-sig') as f:
-                writer = csv.writer(f)
+                writer = csv.writer(f, delimiter=';')
                 writer.writerow(["Mois", "Montant Total", "Montant Payé", "Reste à Payer", "Devise",
                                "Statut Souscription", "Statut", "Statut Paiement"])
                 # Adapter les données pour l'export
@@ -370,6 +451,8 @@ class HistoriqueDialog(ctk.CTkToplevel):
                     else:
                         row = [p[0], p[1], p[1], 0, p[2], p[3], p[4], "Complet"]
                     writer.writerow(row)
+                writer.writerow([])
+                writer.writerow(["Filtres", "Aucun filtre individuel dans l'historique", "", "", "", "", "", ""])
 
             messagebox.showinfo("Export réussi",
                               f"Fichier sauvegardé :\n{filename}")
@@ -386,14 +469,18 @@ class HistoriqueDialog(ctk.CTkToplevel):
         # Dimensions adaptatives
         screen_w = self.winfo_screenwidth()
         screen_h = self.winfo_screenheight()
-        if screen_w < 1024:
-            chart_width = screen_w - 60
-            chart_height = screen_h - 80
+        if min(screen_w, screen_h) < 900:
+            chart_width = max(320, screen_w - 40)
+            chart_height = max(260, screen_h - 60)
+        elif screen_w < 1366:
+            chart_width = min(760, screen_w - 80)
+            chart_height = min(520, screen_h - 100)
         else:
-            chart_width = min(700, screen_w - 100)
-            chart_height = min(450, screen_h - 100)
-        
+            chart_width = min(840, screen_w - 100)
+            chart_height = min(560, screen_h - 120)
+
         chart_dialog.geometry(f"{chart_width}x{chart_height}")
+        chart_dialog.minsize(min(chart_width, 320), min(chart_height, 260))
         chart_dialog.configure(fg_color=C["bg_deep"])
         chart_dialog.transient(self)
         chart_dialog.grab_set()
@@ -479,10 +566,25 @@ class HistoriqueDialog(ctk.CTkToplevel):
 class AppGestionLoyers(ctk.CTk):
     def __init__(self):
         super().__init__()
+        self._screen = detect_screen_profile()
+        short_side = min(self._screen.width, self._screen.height)
+        if short_side < 900:
+            self._ui_scale = 0.90
+        elif short_side < 1100:
+            self._ui_scale = 0.96
+        elif short_side < 1400:
+            self._ui_scale = 1.00
+        elif short_side < 1800:
+            self._ui_scale = 1.04
+        else:
+            self._ui_scale = 1.08
         self.configure(fg_color=C["bg_deep"])
         self.title("TAP · Gestion des Loyers")
         self._set_initial_geometry()
-        self.minsize(700, 500)  # Réduit pour supporter les petits écrans
+        self.minsize(
+            max(680, min(980, self._screen.width - 20)),
+            max(520, min(760, self._screen.height - 20)),
+        )
         
         # Cache des données
         self._all_data: list = []
@@ -514,10 +616,12 @@ class AppGestionLoyers(ctk.CTk):
         self._current_chart_layout = None
         self._current_table_card_columns = None
         self._current_kpi_columns = None
+        self._layout_profile = None
         
         # État de chargement
         self._is_loading = False
         self._loading_after_id = None
+        self._maintenance_after_id = None
 
         self._build_sidebar()
         self._build_main()
@@ -528,6 +632,7 @@ class AppGestionLoyers(ctk.CTk):
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         
         self.after(250, self._apply_responsive_layout)
+        self._schedule_automatic_maintenance()
         self.charger_donnees()
 
     # ── Raccourcis clavier ───────────────────────────────────────────────────
@@ -591,51 +696,61 @@ class AppGestionLoyers(ctk.CTk):
         sb = ctk.CTkFrame(self, width=210, corner_radius=0, fg_color=C["bg_panel"])
         sb.pack(side="left", fill="y")
         sb.pack_propagate(False)
+        self.sidebar_frame = sb
 
         brand = ctk.CTkFrame(sb, fg_color="transparent")
         brand.pack(fill="x", padx=24, pady=(32, 0))
-        ctk.CTkLabel(brand, text="TAP",
-                     font=ctk.CTkFont(family="Georgia", size=42, weight="bold"),
-                     text_color=C["accent"]).pack(anchor="w")
-        ctk.CTkLabel(brand, text="GESTION LOYERS",
-                     font=ctk.CTkFont(size=10, weight="bold"),
-                     text_color=C["text_lo"]).pack(anchor="w")
+        self.sidebar_brand = ctk.CTkLabel(brand, text="TAP",
+                                          font=ctk.CTkFont(family="Georgia", size=42, weight="bold"),
+                                          text_color=C["accent"])
+        self.sidebar_brand.pack(anchor="w")
+        self.sidebar_subtitle = ctk.CTkLabel(brand, text="GESTION LOYERS",
+                                             font=ctk.CTkFont(size=10, weight="bold"),
+                                             text_color=C["text_lo"])
+        self.sidebar_subtitle.pack(anchor="w")
 
         ctk.CTkFrame(sb, height=1, fg_color=C["border"]).pack(fill="x", padx=24, pady=24)
 
         nav = ctk.CTkFrame(sb, fg_color="transparent")
         nav.pack(fill="x", padx=16)
 
-        SidebarButton(nav, text="  ➕  Nouveau Paiement",
-                      fg_color=C["accent"], hover_color=C["accent_dim"],
-                      text_color="#000000", font=ctk.CTkFont(size=13, weight="bold"),
-                      command=self.ouvrir_formulaire).pack(fill="x", pady=(0, 8))
-        SidebarButton(nav, text="  🔄  Actualiser",
-                      command=self.charger_donnees).pack(fill="x", pady=(0, 8))
-        SidebarButton(nav, text="  📄  Exporter PDF",
-                      fg_color="#2A1A1A", hover_color="#3D1F1F",
-                      text_color=C["red"],
-                      command=self.generer_pdf).pack(fill="x", pady=(0, 8))
+        self.sidebar_buttons = [
+            SidebarButton(nav, text="  ➕  Nouveau Paiement",
+                          fg_color=C["accent"], hover_color=C["accent_dim"],
+                          text_color="#000000", font=ctk.CTkFont(size=13, weight="bold"),
+                          command=self.ouvrir_formulaire),
+            SidebarButton(nav, text="  🔄  Actualiser",
+                          command=self.charger_donnees),
+            SidebarButton(nav, text="  📄  Exporter PDF",
+                          fg_color="#FFF4F4", hover_color="#FDECEC",
+                          text_color=C["red"],
+                          command=self.generer_pdf),
+        ]
+        for button in self.sidebar_buttons:
+            button.pack(fill="x", pady=(0, 8))
 
         ctk.CTkFrame(sb, fg_color="transparent").pack(fill="both", expand=True)
-        ctk.CTkLabel(sb, text="v3.3  ·  TAP Loyers",
-                     font=ctk.CTkFont(size=10),
-                     text_color=C["text_lo"]).pack(pady=20)
+        self.sidebar_footer = ctk.CTkLabel(sb, text="v3.6  ·  TAP Loyers",
+                                           font=ctk.CTkFont(size=10),
+                                           text_color=C["text_lo"])
+        self.sidebar_footer.pack(pady=20)
 
     # ── ZONE PRINCIPALE ──────────────────────────────────────────────────────
     def _build_main(self):
         main = ctk.CTkFrame(self, fg_color="transparent")
-        main.pack(side="right", fill="both", expand=True, padx=24, pady=24)
+        main.pack(side="right", fill="both", expand=True, padx=20, pady=20)
+        self.main_frame = main
 
         # Header
         hdr = ctk.CTkFrame(main, fg_color="transparent")
         hdr.pack(fill="x", pady=(0, 16))
-        ctk.CTkLabel(hdr, text="Tableau de bord",
-                     font=ctk.CTkFont(family="Georgia", size=24, weight="bold"),
-                     text_color=C["text_hi"]).pack(side="left")
-        ctk.CTkLabel(hdr, text="Souscriptions & Paiements",
-                     font=ctk.CTkFont(size=13), text_color=C["text_lo"]
-                     ).pack(side="left", padx=(12, 0), pady=(6, 0))
+        self.header_title = ctk.CTkLabel(hdr, text="Tableau de bord",
+                                         font=ctk.CTkFont(family="Georgia", size=24, weight="bold"),
+                                         text_color=C["text_hi"])
+        self.header_title.pack(side="left")
+        self.header_subtitle = ctk.CTkLabel(hdr, text="Souscriptions & Paiements",
+                                            font=ctk.CTkFont(size=13), text_color=C["text_lo"])
+        self.header_subtitle.pack(side="left", padx=(12, 0), pady=(6, 0))
 
         self.status_bar = ctk.CTkLabel(
             main,
@@ -677,44 +792,54 @@ class AppGestionLoyers(ctk.CTk):
         f = ctk.CTkFrame(parent, fg_color=C["bg_card"], corner_radius=10,
                           border_width=1, border_color=C["border"])
         f.pack(fill="x", pady=(0, 12))
+        self.filters_card = f
 
         header = ctk.CTkFrame(f, fg_color="transparent")
         header.pack(fill="x", padx=16, pady=(12, 4))
-        ctk.CTkLabel(header, text="Filtres combinables",
-                     font=ctk.CTkFont(size=13, weight="bold"),
-                     text_color=C["text_hi"]).pack(side="left")
-        ctk.CTkLabel(header, text="Choisissez un type, ajoutez-le, puis cumulez d'autres critères.",
-                     font=ctk.CTkFont(size=10),
-                     text_color=C["text_lo"]).pack(side="left", padx=(12, 0))
+        self.filters_title = ctk.CTkLabel(header, text="Filtres combinables",
+                                          font=ctk.CTkFont(size=13, weight="bold"),
+                                          text_color=C["text_hi"])
+        self.filters_title.pack(side="left")
+        self.filters_help = ctk.CTkLabel(header, text="Choisissez un type, ajoutez-le, puis cumulez d'autres critères.",
+                                         font=ctk.CTkFont(size=10),
+                                         text_color=C["text_lo"])
+        self.filters_help.pack(side="left", padx=(12, 0))
 
-        row = ctk.CTkFrame(f, fg_color="transparent")
-        row.pack(fill="x", padx=16, pady=(6, 10))
+        self.filter_type_row = ctk.CTkFrame(f, fg_color="transparent")
+        self.filter_type_row.pack(fill="x", padx=16, pady=(6, 6))
 
-        ctk.CTkLabel(row, text="Type", font=ctk.CTkFont(size=11),
-                     text_color=C["text_lo"]).pack(side="left", padx=(0, 6))
-        self.combo_type_filtre = self._combo(row, ["Nom", "Mois", "Statut", "Statut souscription", "Devise"], "Nom", 170)
+        self.filter_type_label = ctk.CTkLabel(self.filter_type_row, text="Type",
+                                              font=ctk.CTkFont(size=11),
+                                              text_color=C["text_lo"])
+        self.filter_type_label.pack(side="left", padx=(0, 6))
+        self.combo_type_filtre = self._combo(self.filter_type_row, ["Nom", "Mois", "Statut", "Statut souscription", "Devise"], "Nom", 170)
         self.combo_type_filtre.configure(command=self._on_filter_type_change)
         self.combo_type_filtre.pack(side="left", padx=(0, 10))
 
-        self.filter_value_holder = ctk.CTkFrame(row, fg_color="transparent")
+        self.filter_value_row = ctk.CTkFrame(f, fg_color="transparent")
+        self.filter_value_row.pack(fill="x", padx=16, pady=(0, 10))
+        self.filter_value_holder = ctk.CTkFrame(self.filter_value_row, fg_color="transparent")
         self.filter_value_holder.pack(side="left", fill="x", expand=True)
         self._build_filter_value_widget("Nom")
 
-        ctk.CTkButton(row, text="Ajouter", width=96, height=32,
-                      fg_color=C["accent"], hover_color=C["accent_dim"],
-                      text_color="#000000", font=ctk.CTkFont(size=12, weight="bold"),
-                      corner_radius=6, command=self._add_or_update_filter
-                      ).pack(side="left", padx=(10, 8))
-        ctk.CTkButton(row, text="Appliquer", width=92, height=32,
-                      fg_color=C["bg_section"], hover_color=C["border"],
-                      text_color=C["text_hi"], font=ctk.CTkFont(size=12, weight="bold"),
-                      corner_radius=6, command=self.charger_donnees
-                      ).pack(side="left", padx=(0, 8))
-        ctk.CTkButton(row, text="Tout", width=70, height=32,
-                      fg_color=C["bg_section"], hover_color=C["border"],
-                      text_color=C["text_lo"], corner_radius=6,
-                      command=self._reset_filters
-                      ).pack(side="left")
+        self.filter_actions_row = ctk.CTkFrame(f, fg_color="transparent")
+        self.filter_actions_row.pack(fill="x", padx=16, pady=(0, 10))
+
+        self.btn_add_filter = ctk.CTkButton(self.filter_actions_row, text="Ajouter", width=96, height=32,
+                                            fg_color=C["accent"], hover_color=C["accent_dim"],
+                                            text_color="#000000", font=ctk.CTkFont(size=12, weight="bold"),
+                                            corner_radius=6, command=self._add_or_update_filter)
+        self.btn_add_filter.pack(side="left", padx=(0, 8))
+        self.btn_apply_filters = ctk.CTkButton(self.filter_actions_row, text="Appliquer", width=92, height=32,
+                                               fg_color=C["bg_section"], hover_color=C["border"],
+                                               text_color=C["text_hi"], font=ctk.CTkFont(size=12, weight="bold"),
+                                               corner_radius=6, command=self.charger_donnees)
+        self.btn_apply_filters.pack(side="left", padx=(0, 8))
+        self.btn_reset_filters = ctk.CTkButton(self.filter_actions_row, text="Tout", width=70, height=32,
+                                               fg_color=C["bg_section"], hover_color=C["border"],
+                                               text_color=C["text_lo"], corner_radius=6,
+                                               command=self._reset_filters)
+        self.btn_reset_filters.pack(side="left")
 
         chips_header = ctk.CTkFrame(f, fg_color="transparent")
         chips_header.pack(fill="x", padx=16, pady=(0, 6))
@@ -770,14 +895,23 @@ class AppGestionLoyers(ctk.CTk):
 
         cols = ("Nom", "Prénom", "Mois", "Montant", "Devise", "Statut Souscription", "Statut")
         self.tableau = ttk.Treeview(tbl_inner, columns=cols, show="headings",
-                                    style="TAP.Treeview")
-        widths = {"Nom": 160, "Prénom": 140, "Mois": 120,
-                  "Montant": 110, "Devise": 90, "Statut Souscription": 160, "Statut": 120}
-        anchors = {"Nom": "w", "Prénom": "w", "Montant": "e"}
+                                    style="TAP.Treeview", height=5)
+        widths = {"Nom": 210, "Prénom": 190, "Mois": 140,
+                  "Montant": 130, "Devise": 95, "Statut Souscription": 170, "Statut": 120}
+        anchors = {
+            "Nom": "w",
+            "Prénom": "w",
+            "Mois": "center",
+            "Montant": "e",
+            "Devise": "center",
+            "Statut Souscription": "center",
+            "Statut": "center",
+        }
         for col in cols:
-            self.tableau.heading(col, text=col.upper())
+            self.tableau.heading(col, text=col.upper(), anchor=anchors.get(col, "center"))
             self.tableau.column(col, width=widths.get(col, 100),
                                 anchor=anchors.get(col, "center"),
+                                stretch=col in {"Nom", "Prénom", "Statut Souscription"},
                                 minwidth=70)
 
         sb_y = ctk.CTkScrollbar(tbl_inner, command=self.tableau.yview,
@@ -913,19 +1047,19 @@ class AppGestionLoyers(ctk.CTk):
 
     # ── STYLES TTK ───────────────────────────────────────────────────────────
     def _apply_table_style(self):
-        s = ttk.Style()
-        s.theme_use("default")
-        s.configure("TAP.Treeview", background=C["bg_section"], foreground=C["text_hi"],
-                    rowheight=34, fieldbackground=C["bg_section"],
-                    borderwidth=0, font=("Consolas", 11))
-        s.configure("TAP.Treeview.Heading", background=C["tbl_head"],
-                    foreground=C["text_lo"], relief="flat",
-                    font=("Consolas", 10, "bold"), padding=(8, 10))
-        s.map("TAP.Treeview",
-              background=[("selected", C["tbl_select"])],
-              foreground=[("selected", C["text_hi"])])
-        s.map("TAP.Treeview.Heading",
-              background=[("active", C["bg_section"])])
+        self._table_style = ttk.Style()
+        self._table_style.theme_use("default")
+        self._table_style.configure("TAP.Treeview", background=C["bg_section"], foreground=C["text_hi"],
+                                    rowheight=40, fieldbackground=C["bg_section"],
+                                    borderwidth=0, font=("Segoe UI", 11))
+        self._table_style.configure("TAP.Treeview.Heading", background=C["tbl_head"],
+                                    foreground=C["text_lo"], relief="flat",
+                                    font=("Segoe UI", 10, "bold"), padding=(10, 12))
+        self._table_style.map("TAP.Treeview",
+                              background=[("selected", C["tbl_select"])],
+                              foreground=[("selected", C["text_hi"])])
+        self._table_style.map("TAP.Treeview.Heading",
+                              background=[("active", C["bg_section"])])
         self.tableau.tag_configure("even",   background=C["tbl_even"])
         self.tableau.tag_configure("odd",    background=C["tbl_odd"])
         self.tableau.tag_configure("paye",   foreground=C["green"])
@@ -934,27 +1068,31 @@ class AppGestionLoyers(ctk.CTk):
 
     def _set_initial_geometry(self):
         self.update_idletasks()
-        screen_width = self.winfo_screenwidth()
-        screen_height = self.winfo_screenheight()
-        
-        # Dimensions adaptatives pour tous types d'écrans
-        if screen_width < 1024:
-            # Écran très petit
-            width = screen_width - 20
-            height = screen_height - 40
+        screen_width = self._screen.width
+        screen_height = self._screen.height
+
+        if min(screen_width, screen_height) < 900:
+            width_ratio, height_ratio = 0.96, 0.92
+            min_width, min_height = 700, 520
         elif screen_width < 1366:
-            # Écran petit
-            width = min(int(screen_width * 0.95), 900)
-            height = min(int(screen_height * 0.85), 650)
+            width_ratio, height_ratio = 0.92, 0.86
+            min_width, min_height = 900, 640
+        elif screen_width < 1920:
+            width_ratio, height_ratio = 0.90, 0.90
+            min_width, min_height = 1100, 760
         else:
-            # Écran standard ou large
-            width = min(max(int(screen_width * 0.92), 960), screen_width)
-            height = min(max(int(screen_height * 0.9), 680), screen_height)
-        
-        # S'assurer que les dimensions sont raisonnables
-        width = max(width, 800)
-        height = max(height, 600)
-        
+            width_ratio, height_ratio = 0.86, 0.88
+            min_width, min_height = 1200, 820
+
+        width, height = clamp_window_geometry(
+            screen_width,
+            screen_height,
+            width_ratio=width_ratio,
+            height_ratio=height_ratio,
+            min_width=min_width,
+            min_height=min_height,
+        )
+
         x = max((screen_width - width) // 2, 0)
         y = max((screen_height - height) // 2, 0)
         self.geometry(f"{width}x{height}+{x}+{y}")
@@ -982,17 +1120,117 @@ class AppGestionLoyers(ctk.CTk):
         if width <= 1:
             return
 
+        profile = build_layout_profile(width)
+        if self._layout_profile == profile:
+            return
+
         self._resize_lock = True
         try:
-            table_columns = 4 if width >= 1450 else 2
-            kpi_columns = 5 if width >= 1550 else 3 if width >= 1180 else 2
-            chart_mode = "side" if width >= 1500 else "stacked"
-
-            self._layout_table_cards(table_columns)
-            self._layout_kpi_cards(kpi_columns)
-            self._layout_dashboard_charts(chart_mode)
+            self._layout_profile = profile
+            self._layout_sidebar(profile)
+            self._layout_main(profile)
+            self._layout_filters(profile)
+            self._layout_table_cards(profile.table_card_columns)
+            self._layout_kpi_cards(profile.kpi_columns)
+            self._layout_dashboard_charts(profile.chart_mode)
+            self._layout_table_columns(profile)
+            self._layout_dashboard_filters(profile)
         finally:
             self._resize_lock = False
+
+    def _layout_sidebar(self, profile):
+        if hasattr(self, "sidebar_frame"):
+            self.sidebar_frame.configure(width=profile.sidebar_width)
+        if hasattr(self, "sidebar_brand"):
+            self.sidebar_brand.configure(font=ctk.CTkFont(family="Georgia", size=profile.sidebar_brand_size, weight="bold"))
+        if hasattr(self, "sidebar_subtitle"):
+            self.sidebar_subtitle.configure(font=ctk.CTkFont(size=profile.sidebar_subtitle_size, weight="bold"))
+        if hasattr(self, "sidebar_footer"):
+            self.sidebar_footer.configure(font=ctk.CTkFont(size=max(9, profile.sidebar_subtitle_size - 1)))
+        for button in getattr(self, "sidebar_buttons", []):
+            try:
+                button.configure(font=ctk.CTkFont(size=profile.sidebar_button_size, weight="bold" if button is self.sidebar_buttons[0] else "normal"))
+            except Exception:
+                pass
+
+    def _layout_main(self, profile):
+        if hasattr(self, "main_frame"):
+            self.main_frame.pack_configure(padx=profile.main_padding, pady=profile.main_padding)
+        if hasattr(self, "header_title"):
+            self.header_title.configure(font=ctk.CTkFont(family="Georgia", size=profile.header_title_size, weight="bold"))
+        if hasattr(self, "header_subtitle"):
+            self.header_subtitle.configure(font=ctk.CTkFont(size=profile.header_subtitle_size))
+        if hasattr(self, "status_bar"):
+            self.status_bar.configure(font=ctk.CTkFont(size=max(10, profile.header_subtitle_size - 1)))
+        if hasattr(self, "filters_title"):
+            self.filters_title.configure(font=ctk.CTkFont(size=max(12, profile.header_subtitle_size), weight="bold"))
+        if hasattr(self, "filters_help"):
+            self.filters_help.configure(font=ctk.CTkFont(size=max(9, profile.header_subtitle_size - 2)))
+        if hasattr(self, "lbl_count"):
+            self.lbl_count.configure(font=ctk.CTkFont(size=max(10, profile.header_subtitle_size - 1)))
+        if hasattr(self, "lbl_table_hint"):
+            self.lbl_table_hint.configure(font=ctk.CTkFont(size=max(9, profile.header_subtitle_size - 2)))
+
+    def _layout_filters(self, profile):
+        if not hasattr(self, "combo_type_filtre"):
+            return
+
+        try:
+            self.combo_type_filtre.configure(width=150 if profile.name == "compact" else 170)
+            self.combo_type_filtre.pack_configure(side="left", padx=(0, 10))
+        except Exception:
+            pass
+
+        try:
+            self.filter_value_holder.pack_configure(side="left" if profile.filter_mode == "inline" else "left", fill="x", expand=True)
+        except Exception:
+            pass
+
+        for button in (getattr(self, "btn_add_filter", None), getattr(self, "btn_apply_filters", None), getattr(self, "btn_reset_filters", None)):
+            if button:
+                try:
+                    button.configure(height=30 if profile.name == "compact" else 32)
+                except Exception:
+                    pass
+
+        if hasattr(self, "filters_card"):
+            try:
+                if profile.filter_mode == "inline":
+                    self.filters_card.configure(corner_radius=10)
+                else:
+                    self.filters_card.configure(corner_radius=12)
+            except Exception:
+                pass
+
+    def _layout_dashboard_filters(self, profile):
+        if hasattr(self, "combo_devise_dashboard"):
+            try:
+                self.combo_devise_dashboard.configure(width=130 if profile.name == "compact" else 150)
+            except Exception:
+                pass
+
+    def _layout_table_columns(self, profile):
+        if not hasattr(self, "tableau"):
+            return
+
+        try:
+            self._table_style.configure(
+                "TAP.Treeview",
+                rowheight=profile.table_row_height,
+                font=("Segoe UI", profile.table_body_font_size),
+            )
+            self._table_style.configure(
+                "TAP.Treeview.Heading",
+                font=("Segoe UI", profile.table_head_font_size, "bold"),
+            )
+        except Exception:
+            pass
+
+        for column, width in profile.table_widths.items():
+            try:
+                self.tableau.column(column, width=width, minwidth=max(60, width - 40))
+            except Exception:
+                pass
 
     def _layout_table_cards(self, columns: int):
         if self._current_table_card_columns == columns:
@@ -1018,6 +1256,13 @@ class AppGestionLoyers(ctk.CTk):
             card.grid(row=row, column=column, columnspan=columnspan, sticky="nsew",
                       padx=(0, 10) if columnspan == 1 and column < columns - 1 else 0,
                       pady=(0, 10) if columns < 4 else 0)
+            if hasattr(card, "set_density"):
+                if columns == 1:
+                    card.set_density(value_size=22, label_size=10, sub_size=9, icon_size=11)
+                elif columns == 2:
+                    card.set_density(value_size=24, label_size=10, sub_size=9, icon_size=11)
+                else:
+                    card.set_density(value_size=26, label_size=11, sub_size=10, icon_size=12)
 
         self._current_table_card_columns = columns
 
@@ -1048,6 +1293,13 @@ class AppGestionLoyers(ctk.CTk):
             card.grid(row=row, column=column, columnspan=columnspan, sticky="nsew",
                       padx=(0, 10) if columnspan == 1 and column < columns - 1 else 0,
                       pady=(0, 10) if columns < 5 else 0)
+            if hasattr(card, "set_density"):
+                if columns == 2:
+                    card.set_density(value_size=22, label_size=10, sub_size=9, icon_size=11)
+                elif columns == 3:
+                    card.set_density(value_size=24, label_size=10, sub_size=9, icon_size=11)
+                else:
+                    card.set_density(value_size=28, label_size=11, sub_size=10, icon_size=12)
 
         self._current_kpi_columns = columns
 
@@ -1076,6 +1328,28 @@ class AppGestionLoyers(ctk.CTk):
             self.frame_pie.grid(row=0, column=1, sticky="nsew")
 
         self._current_chart_layout = mode
+
+    def _schedule_automatic_maintenance(self):
+        """Planifie l'entretien automatique périodique."""
+        if self._maintenance_after_id is not None:
+            try:
+                self.after_cancel(self._maintenance_after_id)
+            except Exception:
+                pass
+        self._maintenance_after_id = self.after(60 * 60 * 1000, self._run_automatic_maintenance)
+
+    def _run_automatic_maintenance(self):
+        """Relance la maintenance automatique et la replanifie."""
+        self._maintenance_after_id = None
+        try:
+            executer_mise_a_jour_automatique()
+            if not self._is_loading:
+                self._set_status("🔄 Maintenance automatique effectuée.")
+        except Exception as e:
+            self._set_status(f"⚠️ Maintenance automatique en erreur: {e}")
+        finally:
+            if self.winfo_exists():
+                self._schedule_automatic_maintenance()
 
     # ── LOGIQUE PRINCIPALE ───────────────────────────────────────────────────
     def ouvrir_formulaire(self):
@@ -1746,6 +2020,11 @@ class AppGestionLoyers(ctk.CTk):
     def _on_close(self):
         """Fermeture propre de l'application"""
         try:
+            if self._maintenance_after_id is not None:
+                try:
+                    self.after_cancel(self._maintenance_after_id)
+                except Exception:
+                    pass
             # Nettoyer les figures matplotlib
             import matplotlib.pyplot as plt
             if hasattr(self, '_fig_bar'):

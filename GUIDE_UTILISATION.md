@@ -341,5 +341,5 @@ Pour toute question ou problème :
 
 ---
 
-**Version** : 3.1
+**Version** : 3.6
 **Date** : Juin 2026

@@ -91,6 +91,14 @@ Le fichier `config.json` contient les paramètres de connexion à la base de don
    python main.py
    ```
 
+## Nouveautés Version 3.6
+
+- Les souscripteurs marqués `Spécial` sont dupliqués automatiquement au début de chaque mois.
+- Les nouveaux enregistrements spéciaux démarrent en `En attente`.
+- À partir du 7 du mois, les enregistrements encore en attente passent en `Litigieux`.
+- Le dashboard est affiché en mode horizontal.
+- Le tableau principal affiche 5 lignes visibles pour une lecture plus rapide.
+
 ## Dépendances Python
 ```
 customtkinter==5.2.0

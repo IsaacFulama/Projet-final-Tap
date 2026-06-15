@@ -3,6 +3,7 @@ from tkinter import messagebox
 from typing import Optional
 
 from tap.config.theme import C
+from tap.config.responsive import clamp_window_geometry, detect_screen_profile
 from tap.core.auth import authenticate_user
 
 
@@ -15,12 +16,17 @@ class LoginDialog(ctk.CTk):
         self.authenticated = False
         self.password_visible = False
         self.attempts_remaining = 5
+        self._screen = detect_screen_profile()
+        self._compact_mode = self._screen.width < 1100
         
         self.title('TAP · Gestion des Loyers')
         self._set_initial_geometry()
         self.configure(fg_color=C['bg_deep'])
         self.resizable(True, True)
-        self.minsize(320, 300)  # Réduit pour supporter les petits écrans
+        self.minsize(
+            max(300, min(350, self._screen.width - 20)),
+            max(280, min(320, self._screen.height - 20)),
+        )
         
         # Centrer la fenêtre
         self.center_window()
@@ -42,29 +48,26 @@ class LoginDialog(ctk.CTk):
     def _set_initial_geometry(self) -> None:
         """Définit la géométrie initiale de la fenêtre de manière responsive."""
         self.update_idletasks()
-        screen_width = self.winfo_screenwidth()
-        screen_height = self.winfo_screenheight()
-        
-        # Dimensions adaptatives pour tous types d'écrans
-        # Écrans petits : 1024x768 minimum
-        # Écrans moyens : 1366x768
-        # Écrans larges : 1920x1080 et plus
-        if screen_width < 1024:
-            # Écran très petit (tablette, netbook)
-            width = min(screen_width - 40, 380)
-            height = min(screen_height - 40, 340)
+        screen_width = self._screen.width
+        screen_height = self._screen.height
+
+        if min(screen_width, screen_height) < 900:
+            width_ratio, height_ratio = 0.92, 0.84
         elif screen_width < 1366:
-            # Écran petit
-            width = min(int(screen_width * 0.45), 420)
-            height = min(int(screen_height * 0.60), 380)
+            width_ratio, height_ratio = 0.40, 0.56
+        elif screen_width < 1920:
+            width_ratio, height_ratio = 0.34, 0.52
         else:
-            # Écran standard ou large
-            width = min(int(screen_width * 0.34), 560)
-            height = min(int(screen_height * 0.55), 520)
-        
-        # S'assurer que les dimensions sont raisonnables
-        width = max(width, 350)
-        height = max(height, 320)
+            width_ratio, height_ratio = 0.28, 0.48
+
+        width, height = clamp_window_geometry(
+            screen_width,
+            screen_height,
+            width_ratio=width_ratio,
+            height_ratio=height_ratio,
+            min_width=350,
+            min_height=320,
+        )
         
         x = (screen_width - width) // 2
         y = (screen_height - height) // 2
@@ -74,24 +77,25 @@ class LoginDialog(ctk.CTk):
         """Construit l'interface utilisateur du dialogue de connexion."""
         card = ctk.CTkFrame(self, fg_color=C['bg_card'], corner_radius=16,
                             border_width=1, border_color=C['border'])
-        card.pack(fill='both', expand=True, padx=30, pady=30)
+        card.pack(fill='both', expand=True, padx=18 if self._compact_mode else 30,
+                  pady=18 if self._compact_mode else 30)
         
         # Header
         header = ctk.CTkFrame(card, fg_color='transparent')
-        header.pack(fill='x', padx=24, pady=(24, 20))
+        header.pack(fill='x', padx=20 if self._compact_mode else 24, pady=(20 if self._compact_mode else 24, 20))
         
         ctk.CTkLabel(header, text='TAP',
-                     font=ctk.CTkFont(family='Georgia', size=36, weight='bold'),
+                     font=ctk.CTkFont(family='Georgia', size=32 if self._compact_mode else 36, weight='bold'),
                      text_color=C['accent']).pack(anchor='center')
         ctk.CTkLabel(header, text='GESTION LOYERS',
                      font=ctk.CTkFont(size=12, weight='bold'),
                      text_color=C['text_lo']).pack(anchor='center', pady=(4, 0))
         
-        ctk.CTkFrame(card, height=1, fg_color=C['border']).pack(fill='x', padx=24, pady=(0, 20))
+        ctk.CTkFrame(card, height=1, fg_color=C['border']).pack(fill='x', padx=20 if self._compact_mode else 24, pady=(0, 20))
         
         # Formulaire de connexion
         form = ctk.CTkFrame(card, fg_color='transparent')
-        form.pack(fill='both', expand=True, padx=24, pady=(0, 20))
+        form.pack(fill='both', expand=True, padx=20 if self._compact_mode else 24, pady=(0, 20))
         
         # Nom d'utilisateur
         ctk.CTkLabel(form, text='Nom d\'utilisateur',
@@ -128,7 +132,7 @@ class LoginDialog(ctk.CTk):
         self.btn_toggle_password = ctk.CTkButton(
             password_row,
             text='Afficher',
-            width=90,
+            width=80 if self._compact_mode else 90,
             height=40,
             fg_color=C['bg_section'],
             hover_color=C['border'],

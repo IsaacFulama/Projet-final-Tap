@@ -1,5 +1,7 @@
 # TAP Gestion des Loyers — Guide client
 
+**Version 3.6** | Juin 2026
+
 ## Lancement
 1. Ouvrir `TAP_Gestion_Loyers.exe`
 2. Se connecter avec :
@@ -22,6 +24,8 @@
 - Filtrage par statut de souscription
 - Export PDF et CSV
 - Historique des paiements par locataire
+- Interface claire et professionnelle avec fond blanc
+- Tableau des enregistrements agrandi pour une lecture plus confortable
 
 ## En cas de souci
 - Vérifier que MySQL est bien lancé

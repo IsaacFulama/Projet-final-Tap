@@ -17,8 +17,11 @@ def get_base_dir() -> Path:
 
 
 def load_db_config() -> dict:
+    base_dir = get_base_dir()
     search_paths = [
-        get_base_dir() / "config.json",
+        Path.cwd() / "config.json",
+        base_dir / "CLIENT_FINAL" / "config.json",
+        base_dir / "config.json",
         Path(getattr(sys, "_MEIPASS", "")) / "config.json" if getattr(sys, "_MEIPASS", None) else None,
     ]
 

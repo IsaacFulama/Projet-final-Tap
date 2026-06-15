@@ -10,6 +10,7 @@ import sys
 
 import customtkinter as ctk
 
+from tap.config.responsive import apply_responsive_scaling
 from tap.core.error_reporter import report_error
 from tap.presentation.dialogs.login import LoginDialog
 from tap.presentation.views.main_window import AppGestionLoyers
@@ -26,8 +27,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Configuration de l'interface
-ctk.set_appearance_mode("Dark")
+ctk.set_appearance_mode("Light")
 ctk.set_default_color_theme("blue")
+apply_responsive_scaling()
 
 
 def launch_app() -> None:
