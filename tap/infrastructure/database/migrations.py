@@ -76,6 +76,40 @@ def initialiser_schema_si_absent():
         )
         cursor.execute(
             """
+            CREATE TABLE IF NOT EXISTS portail_locataire_tokens (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                locataire_id INT NOT NULL,
+                token_hash CHAR(64) NOT NULL UNIQUE,
+                expires_at DATETIME NOT NULL,
+                last_used_at DATETIME NULL,
+                revoked_at DATETIME NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                CONSTRAINT fk_portail_token_locataire
+                    FOREIGN KEY (locataire_id) REFERENCES locataires(id)
+                    ON DELETE CASCADE,
+                INDEX idx_portail_token_locataire (locataire_id),
+                INDEX idx_portail_token_expiration (expires_at)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """
+        )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS offline_sync_events (
+                event_id CHAR(36) PRIMARY KEY,
+                device_id VARCHAR(100) NOT NULL,
+                event_type VARCHAR(60) NOT NULL,
+                payload_json TEXT NOT NULL,
+                status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                conflict_json TEXT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                synced_at DATETIME NULL,
+                INDEX idx_sync_status (status),
+                INDEX idx_sync_device (device_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """
+        )
+        cursor.execute(
+            """
             CREATE TABLE IF NOT EXISTS schema_migrations (
                 version VARCHAR(32) PRIMARY KEY,
                 name VARCHAR(150) NOT NULL,

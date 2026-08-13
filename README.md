@@ -25,6 +25,32 @@ Application de gestion des souscriptions et paiements de loyers avec interface m
 - **Tableau de bord** : Vue d'ensemble avec statistiques et graphiques
 - **Historique** : Historique complet des paiements par locataire
 
+### Portail mobile et mode hors ligne
+
+Le projet inclut un serveur mobile séparé :
+
+```powershell
+$env:TAP_MOBILE_API_KEY = 'remplacer-par-une-cle-longue'
+python mobile_server.py
+```
+
+Le portail locataire doit être créé pour un identifiant de locataire existant :
+
+```powershell
+python mobile_server.py --create-token 12 --days 30
+```
+
+Le serveur affiche alors un lien temporaire à transmettre au locataire. Le
+portail permet de consulter les paiements, télécharger/imprimer les reçus et
+signer depuis un écran tactile. Les actions hors ligne sont stockées dans une
+file SQLite locale puis envoyées via `/api/mobile/sync` avec détection des
+conflits ; un conflit n'est jamais écrasé automatiquement.
+
+Pour un accès depuis un téléphone sur le même Wi-Fi, utiliser l'adresse IP du
+PC dans `TAP_MOBILE_HOST_PUBLIC`. Pour un accès Internet, ajouter HTTPS, un
+proxy inverse, une authentification forte et une rotation des clés avant toute
+mise en production.
+
 ### Sécurité
 - **Authentification sécurisée** : Hashage des mots de passe avec SHA-256
 - **Gestion des tentatives** : Verrouillage après 5 tentatives échouées

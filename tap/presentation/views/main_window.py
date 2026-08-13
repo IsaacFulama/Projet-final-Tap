@@ -5,6 +5,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.ticker as mticker
 from collections import Counter, defaultdict
 import csv
+import os
 
 from tap.config.theme import C, MPL, STATUS_COLORS
 from tap.config.responsive import (
@@ -27,6 +28,7 @@ from tap.core.auto_status_updater import (
 from tap.core.dashboard_service import calculate_dashboard_metrics
 from tap.core.models import HistoryPayment, SubscriptionRecord
 from tap.core.local_signature import start_signature_session
+from tap.mobile.portal_service import create_portal_token
 from tap.core.payment_service import PaymentService, SubscriptionFilters
 from tap.core.whatsapp_reports import send_overdue_payment_reminders
 from tap.presentation.components.widgets import SidebarButton, StatCard
@@ -1087,6 +1089,8 @@ class AppGestionLoyers(ctk.CTk):
                                        command=self.ajouter_paiement)
         self.context_menu.add_command(label="  ✍️  Demander signature QR",
                                        command=self.demander_signature_qr)
+        self.context_menu.add_command(label="  📱  Créer lien portail locataire",
+                                       command=self.creer_lien_portail_locataire)
         self.context_menu.add_separator()
         self.context_menu.add_command(label="  ✅  Marquer En règle",
                                        command=lambda: self.modifier_statut("En règle"))
@@ -2121,6 +2125,30 @@ class AppGestionLoyers(ctk.CTk):
             )
             return
         self._demarrer_signature_qr(meta)
+
+    def creer_lien_portail_locataire(self):
+        """Crée un lien temporaire donnant accès au portail du locataire."""
+        item_id, meta = self._get_selected_row()
+        if not item_id or not meta:
+            messagebox.showwarning("Avertissement", "Veuillez sélectionner un paiement.", parent=self)
+            return
+        try:
+            token, expires_at = create_portal_token(int(meta["locataire_id"]), days=30)
+            host = os.getenv("TAP_MOBILE_HOST_PUBLIC", "127.0.0.1")
+            port = os.getenv("TAP_MOBILE_PORT", "8765")
+            url = f"http://{host}:{port}/portal/{token}"
+            self.clipboard_clear()
+            self.clipboard_append(url)
+            messagebox.showinfo(
+                "Portail locataire",
+                f"Lien créé pour {meta['nom']} {meta['prenom']}.\n\n"
+                f"Expiration : {expires_at.strftime('%d/%m/%Y %H:%M')}\n\n"
+                f"Le lien a été copié dans le presse-papiers :\n{url}",
+                parent=self,
+            )
+            self._set_status("✅ Lien du portail locataire copié.")
+        except Exception as exc:
+            messagebox.showerror("Portail locataire", f"Impossible de créer le lien : {exc}", parent=self)
 
     def _demarrer_signature_qr(self, meta: dict):
         """Démarre la signature QR pour un paiement déjà payé."""
