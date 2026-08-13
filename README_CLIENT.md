@@ -1,6 +1,6 @@
 # TAP Gestion des Loyers — Guide client
 
-**Version 3.6** | Juin 2026
+**Version 3.7** | Juillet 2026
 
 ## Lancement
 1. Ouvrir `TAP_Gestion_Loyers.exe`
@@ -10,6 +10,7 @@
 
 ## Configuration
 - Le fichier `config.json` contient les paramètres MySQL.
+- Le port MySQL est configurable (`3306` par défaut).
 - Si votre mot de passe MySQL change, modifiez uniquement ce fichier.
 
 ## Prérequis

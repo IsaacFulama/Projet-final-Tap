@@ -1,0 +1,12 @@
+{
+  "month": "2026-08",
+  "total_encaisse": 25005308.0,
+  "total_restant": 79.0,
+  "paiements_total": 7,
+  "paiements_en_regle": 4,
+  "paiements_litigieux": 3,
+  "devises": [
+    "CDF",
+    "USD"
+  ]
+}

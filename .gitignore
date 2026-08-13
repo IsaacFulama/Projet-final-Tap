@@ -53,6 +53,7 @@ app.log
 
 # Tests
 .pytest_cache/
+.pytest_temp/
 .coverage
 htmlcov/
 .tox/

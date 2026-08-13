@@ -35,8 +35,12 @@ CREATE TABLE paiements (
     locataire_id INT NOT NULL,
     mois DATE NOT NULL,
     montant DECIMAL(10, 2) NOT NULL,
+    montant_total DECIMAL(10, 2) DEFAULT 0.00,
+    montant_paye DECIMAL(10, 2) DEFAULT 0.00,
+    reste_a_payer DECIMAL(10, 2) DEFAULT 0.00,
     devise VARCHAR(10) NOT NULL,
     statut_souscription VARCHAR(20) DEFAULT 'Simple',
+    statut_paiement VARCHAR(20) DEFAULT 'En attente',
     statut VARCHAR(20) DEFAULT 'En attente',
     date_creation TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (locataire_id) REFERENCES locataires(id)
@@ -91,7 +95,7 @@ Le fichier `config.json` contient les paramètres de connexion à la base de don
    python main.py
    ```
 
-## Nouveautés Version 3.6
+## Nouveautés Version 3.7
 
 - Les souscripteurs marqués `Spécial` sont dupliqués automatiquement au début de chaque mois.
 - Les nouveaux enregistrements spéciaux démarrent en `En attente`.
@@ -104,7 +108,7 @@ Le fichier `config.json` contient les paramètres de connexion à la base de don
 customtkinter==5.2.0
 mysql-connector-python==8.0.33
 fpdf2==2.7.4
-matplotlib==3.7.1
+ matplotlib>=3.7.1
 ```
 
 ## Utilisation

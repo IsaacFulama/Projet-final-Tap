@@ -1,5 +1,6 @@
 import csv
 import re
+import unicodedata
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
@@ -39,6 +40,16 @@ def _normalize_rows(rows: Iterable[Sequence]) -> List[Tuple]:
         else:
             continue
     return normalized
+
+
+def _alphabetical_name_key(value) -> str:
+    """Retourne une clé de tri insensible à la casse et aux accents."""
+    text = str(value or "").strip().casefold()
+    return "".join(
+        char
+        for char in unicodedata.normalize("NFKD", text)
+        if not unicodedata.combining(char)
+    )
 
 
 def _build_summary(rows: List[Tuple]) -> Dict[str, object]:
@@ -168,6 +179,12 @@ class PDFReportService:
         title: str = "TAP - Rapport des Souscriptions",
     ) -> bool:
         normalized_rows = _normalize_rows(rows)
+        normalized_rows.sort(
+            key=lambda row: (
+                _alphabetical_name_key(row[0]),
+                _alphabetical_name_key(row[1]),
+            )
+        )
         summary = _build_summary(normalized_rows)
         breakdown = _build_breakdown(normalized_rows)
 

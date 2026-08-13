@@ -1,0 +1,10 @@
+{
+  "error_id": "ERR_20260703_133255",
+  "timestamp": "2026-07-03T13:32:55.174802",
+  "error_type": "AttributeError",
+  "error_message": "'_tkinter.tkapp' object has no attribute '_show_archives_page'",
+  "traceback": "Traceback (most recent call last):\n  File \"tap\\presentation\\bootstrap.py\", line 57, in launch_app\n  File \"tap\\presentation\\views\\main_window.py\", line 628, in __init__\n  File \"tap\\presentation\\views\\main_window.py\", line 805, in _build_main\n  File \"tap\\presentation\\views\\main_window.py\", line 866, in _build_filters\n  File \"tkinter\\__init__.py\", line 2557, in __getattr__\nAttributeError: '_tkinter.tkapp' object has no attribute '_show_archives_page'\n",
+  "context": {
+    "context": "launch_main_app"
+  }
+}

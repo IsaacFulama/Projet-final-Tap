@@ -6,6 +6,82 @@ from tap.core.date_utils import parse_mois_saisie
 from tap.infrastructure.database.connection import obtenir_connexion
 
 
+def initialiser_schema_si_absent():
+    """Crée la base et les tables minimales si elles n'existent pas."""
+    try:
+        conn = obtenir_connexion()
+        if conn is None or not conn.is_connected():
+            return
+
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS locataires (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                nom VARCHAR(100) NOT NULL,
+                prenom VARCHAR(100) NOT NULL,
+                telephone VARCHAR(20) NULL,
+                date_creation TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_nom (nom),
+                INDEX idx_prenom (prenom),
+                INDEX idx_telephone (telephone)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """
+        )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS paiements (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                locataire_id INT NOT NULL,
+                mois DATE NOT NULL,
+                montant DECIMAL(10, 2) NOT NULL,
+                devise VARCHAR(10) NOT NULL,
+                statut_souscription VARCHAR(20) DEFAULT 'Simple',
+                statut VARCHAR(20) DEFAULT 'En attente',
+                date_creation TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                montant_total DECIMAL(10, 2) DEFAULT 0,
+                montant_paye DECIMAL(10, 2) DEFAULT 0,
+                reste_a_payer DECIMAL(10, 2) DEFAULT 0,
+                statut_paiement VARCHAR(20) DEFAULT 'En attente',
+                CONSTRAINT fk_paiements_locataires
+                    FOREIGN KEY (locataire_id) REFERENCES locataires(id)
+                    ON DELETE CASCADE,
+                INDEX idx_statut (statut),
+                INDEX idx_statut_souscription (statut_souscription),
+                INDEX idx_mois (mois),
+                INDEX idx_devise (devise),
+                INDEX idx_statut_paiement (statut_paiement),
+                INDEX idx_locataire_mois_statut (locataire_id, mois, statut_souscription)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """
+        )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS maintenance_journal (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                operation_key VARCHAR(64) NOT NULL,
+                period_key VARCHAR(16) NOT NULL,
+                status VARCHAR(20) NOT NULL DEFAULT 'running',
+                created_count INT NOT NULL DEFAULT 0,
+                error_count INT NOT NULL DEFAULT 0,
+                details_json TEXT NULL,
+                started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                completed_at DATETIME NULL,
+                UNIQUE KEY uq_operation_period (operation_key, period_key)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """
+        )
+        conn.commit()
+        cursor.close()
+        conn.close()
+    except Error as e:
+        print(f"Erreur lors de l'initialisation du schéma: {e}")
+    finally:
+        if "conn" in locals() and conn is not None and conn.is_connected():
+            conn.close()
+
+
 def ajouter_colonne_date_creation():
     """Ajoute la colonne date_creation si elle n'existe pas."""
     try:
@@ -245,10 +321,192 @@ def ajouter_colonnes_acompte():
             conn.close()
 
 
+def ajouter_index_locataire_mois_statut():
+    """Ajoute un index composé utile aux vérifications mensuelles et aux contrôles d'existence."""
+    try:
+        conn = obtenir_connexion()
+        if conn.is_connected():
+            cursor = conn.cursor()
+
+            cursor.execute("SHOW INDEX FROM paiements WHERE Key_name = 'idx_locataire_mois_statut'")
+            # SHOW INDEX peut retourner une ligne par colonne indexée. Il faut
+            # consommer tout le résultat avant d'exécuter une nouvelle requête.
+            if not cursor.fetchall():
+                cursor.execute(
+                    "CREATE INDEX idx_locataire_mois_statut ON paiements(locataire_id, mois, statut_souscription)"
+                )
+                conn.commit()
+                print("Index idx_locataire_mois_statut ajouté avec succès")
+
+            cursor.close()
+            conn.close()
+    except Error as e:
+        print(f"Erreur lors de l'ajout de l'index locataire/mois/statut: {e}")
+    finally:
+        if "conn" in locals() and conn.is_connected():
+            conn.close()
+
+
+def ajouter_table_maintenance_journal():
+    """Crée la table de journalisation des maintenances automatiques."""
+    try:
+        conn = obtenir_connexion()
+        if conn.is_connected():
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                    CREATE TABLE IF NOT EXISTS maintenance_journal (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        operation_key VARCHAR(64) NOT NULL,
+                        period_key VARCHAR(16) NOT NULL,
+                        status VARCHAR(20) NOT NULL DEFAULT 'running',
+                        created_count INT NOT NULL DEFAULT 0,
+                        error_count INT NOT NULL DEFAULT 0,
+                        details_json TEXT NULL,
+                        started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                        completed_at DATETIME NULL,
+                        UNIQUE KEY uq_operation_period (operation_key, period_key)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+            conn.commit()
+            cursor.close()
+            conn.close()
+    except Error as e:
+        print(f"Erreur lors de la création de la table maintenance_journal: {e}")
+    finally:
+        if "conn" in locals() and conn.is_connected():
+            conn.close()
+
+
+def ajouter_table_archives_paiements():
+    """Crée la table archives_paiements pour stocker les vieux enregistrements."""
+    try:
+        conn = obtenir_connexion()
+        if conn.is_connected():
+            cursor = conn.cursor()
+            # On s'assure d'abord que la table n'existe pas déjà
+            cursor.execute("SHOW TABLES LIKE 'archives_paiements'")
+            if not cursor.fetchone():
+                # On la crée avec la structure de 'paiements' (sans les données)
+                cursor.execute("CREATE TABLE archives_paiements LIKE paiements")
+                conn.commit()
+                print("Table archives_paiements créée avec succès")
+            cursor.close()
+            conn.close()
+    except Error as e:
+        print(f"Erreur lors de la création de la table archives_paiements: {e}")
+    finally:
+        if "conn" in locals() and conn.is_connected():
+            conn.close()
+
+
+def ajouter_table_loyer_tarifs():
+    """Crée l'historique optionnel des tarifs applicables par locataire."""
+    try:
+        conn = obtenir_connexion()
+        if conn.is_connected():
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS loyer_tarifs (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    locataire_id INT NOT NULL,
+                    montant DECIMAL(10, 2) NOT NULL,
+                    devise VARCHAR(10) NOT NULL,
+                    effective_from DATE NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (locataire_id) REFERENCES locataires(id) ON DELETE CASCADE,
+                    INDEX idx_tarif_locataire_date (locataire_id, effective_from)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+            conn.commit()
+            cursor.close()
+            conn.close()
+    except Error as e:
+        print(f"Erreur lors de la création de la table loyer_tarifs: {e}")
+    finally:
+        if "conn" in locals() and conn.is_connected():
+            conn.close()
+
+
+def ajouter_table_signatures_paiements():
+    """Crée la table des signatures numériques liées aux paiements."""
+    try:
+        conn = obtenir_connexion()
+        if conn.is_connected():
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS signatures_paiements (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    paiement_id INT NOT NULL,
+                    locataire_id INT NOT NULL,
+                    document_hash VARCHAR(64) NOT NULL,
+                    consentement TINYINT(1) NOT NULL DEFAULT 1,
+                    signature_png LONGBLOB NOT NULL,
+                    signataire_nom VARCHAR(201) NOT NULL,
+                    signed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    signer_ip VARCHAR(45) NULL,
+                    user_agent VARCHAR(255) NULL,
+                    FOREIGN KEY (paiement_id) REFERENCES paiements(id) ON DELETE CASCADE,
+                    FOREIGN KEY (locataire_id) REFERENCES locataires(id) ON DELETE CASCADE,
+                    INDEX idx_signature_paiement (paiement_id),
+                    INDEX idx_signature_locataire (locataire_id),
+                    INDEX idx_signature_signed_at (signed_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+            conn.commit()
+            cursor.close()
+            conn.close()
+    except Error as e:
+        print(f"Erreur lors de la création de la table signatures_paiements: {e}")
+    finally:
+        if "conn" in locals() and conn.is_connected():
+            conn.close()
+
+
+def ajouter_index_unique_locataire_nom_prenom():
+    """Empêche les doublons de locataires au niveau MySQL."""
+    try:
+        conn = obtenir_connexion()
+        if conn.is_connected():
+            cursor = conn.cursor()
+            cursor.execute(
+                "SHOW INDEX FROM locataires WHERE Key_name = 'uq_locataire_nom_prenom'"
+            )
+            if not cursor.fetchall():
+                cursor.execute(
+                    "CREATE UNIQUE INDEX uq_locataire_nom_prenom "
+                    "ON locataires(nom, prenom)"
+                )
+                conn.commit()
+                print("Contrainte unique nom/prénom ajoutée avec succès")
+            cursor.close()
+            conn.close()
+    except Error as e:
+        # Une ancienne base contenant déjà des doublons ne doit pas empêcher
+        # l'application de démarrer : le contrôle applicatif reste actif.
+        print(f"Contrainte unique locataire non ajoutée : {e}")
+    finally:
+        if "conn" in locals() and conn.is_connected():
+            conn.close()
+
+
 def run_migrations():
+    initialiser_schema_si_absent()
     ajouter_colonne_date_creation()
     ajouter_colonne_statut_souscription()
     renommer_statut_ordinaire_en_simple()
     renommer_statut_paye_en_en_regle()
     migrer_mois_vers_date()
     ajouter_colonnes_acompte()
+    ajouter_index_locataire_mois_statut()
+    ajouter_index_unique_locataire_nom_prenom()
+    ajouter_table_maintenance_journal()
+    ajouter_table_archives_paiements()
+    ajouter_table_loyer_tarifs()
+    ajouter_table_signatures_paiements()

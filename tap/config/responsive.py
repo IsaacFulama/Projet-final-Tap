@@ -84,6 +84,19 @@ def apply_responsive_scaling(profile: ScreenProfile | None = None) -> ScreenProf
     except Exception:
         pass
 
+    # Configurer la police des Treeview ttk pour améliorer la lisibilité sur toutes
+    # tailles d'écran (permet de réduire légèrement la taille afin que les enregistrements
+    # restent visibles dans des interfaces compactes).
+    try:
+        layout = build_layout_profile(profile.width)
+        import tkinter as tk
+        from tkinter import ttk
+        style = ttk.Style()
+        style.configure("TAP.Treeview", font=("Helvetica", layout.table_body_font_size))
+        style.configure("TAP.Treeview.Heading", font=("Helvetica", layout.table_head_font_size, "bold"))
+    except Exception:
+        pass
+
     return profile
 
 
@@ -91,23 +104,23 @@ def build_layout_profile(window_width: int) -> LayoutProfile:
     """Retourne un profil de layout adapté à la largeur de la fenêtre."""
     if window_width < 1000:
         widths = {
-            "Nom": 150,
-            "Prénom": 140,
-            "Mois": 110,
-            "Montant": 110,
-            "Devise": 80,
-            "Statut Souscription": 140,
-            "Statut": 100,
+            "Nom": 165,
+            "Prénom": 150,
+            "Mois": 120,
+            "Montant": 120,
+            "Devise": 85,
+            "Statut Souscription": 150,
+            "Statut des versements": 120,
         }
         return LayoutProfile(
             name="compact",
             sidebar_width=160,
-            main_padding=10,
+            main_padding=12,
             table_card_columns=1,
             kpi_columns=2,
             chart_mode="stacked",
             filter_mode="stacked",
-            table_row_height=34,
+            table_row_height=38,
             table_body_font_size=10,
             table_head_font_size=9,
             sidebar_brand_size=30,
@@ -122,23 +135,23 @@ def build_layout_profile(window_width: int) -> LayoutProfile:
 
     if window_width < 1400:
         widths = {
-            "Nom": 190,
-            "Prénom": 170,
-            "Mois": 130,
-            "Montant": 120,
-            "Devise": 90,
-            "Statut Souscription": 150,
-            "Statut": 110,
+            "Nom": 205,
+            "Prénom": 185,
+            "Mois": 140,
+            "Montant": 130,
+            "Devise": 95,
+            "Statut Souscription": 165,
+            "Statut des versements": 135,
         }
         return LayoutProfile(
             name="medium",
             sidebar_width=185,
-            main_padding=14,
+            main_padding=16,
             table_card_columns=2,
             kpi_columns=3,
             chart_mode="stacked",
             filter_mode="stacked",
-            table_row_height=38,
+            table_row_height=42,
             table_body_font_size=11,
             table_head_font_size=10,
             sidebar_brand_size=36,
@@ -152,13 +165,13 @@ def build_layout_profile(window_width: int) -> LayoutProfile:
         )
 
     widths = {
-        "Nom": 210,
-        "Prénom": 190,
-        "Mois": 140,
-        "Montant": 130,
-        "Devise": 95,
-        "Statut Souscription": 170,
-        "Statut": 120,
+        "Nom": 230,
+        "Prénom": 205,
+        "Mois": 150,
+        "Montant": 140,
+        "Devise": 100,
+        "Statut Souscription": 180,
+        "Statut des versements": 145,
     }
     return LayoutProfile(
         name="wide",
@@ -168,7 +181,7 @@ def build_layout_profile(window_width: int) -> LayoutProfile:
         kpi_columns=5,
         chart_mode="side",
         filter_mode="inline",
-        table_row_height=40,
+        table_row_height=46,
         table_body_font_size=11,
         table_head_font_size=10,
         sidebar_brand_size=42,

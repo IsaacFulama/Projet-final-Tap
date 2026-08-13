@@ -1,0 +1,15 @@
+{
+  "database": {
+    "host": "localhost",
+    "database": "gestion_loyers",
+    "user": "root",
+    "password": "",
+    "port": 3306
+  },
+  "whatsapp_reports": {
+    "enabled": true,
+    "recipients": ["+243852382067"],
+    "check_internet": true,
+    "send_monthly_pdf": true
+  }
+}

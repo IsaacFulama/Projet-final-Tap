@@ -1,0 +1,11 @@
+{
+  "month": "2026-08",
+  "total_encaisse": 0.0,
+  "total_restant": 5000.0,
+  "paiements_total": 1,
+  "paiements_en_regle": 0,
+  "paiements_litigieux": 1,
+  "devises": [
+    "CDF"
+  ]
+}

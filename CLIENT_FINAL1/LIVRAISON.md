@@ -40,13 +40,28 @@
 - **Statut souscription** : Spécial ou Simple
 - **Historique** : Historique des paiements par locataire
 - **Export PDF** : Export filtré avec totaux par devise
+- **Envoi WhatsApp automatique** : génération et envoi de rapports PDF mensuels depuis les paiements du mois courant (statuts `En règle` et `Litigieux`)
 - **Dashboard** : Analyse financière avec graphiques
 - **Filtres** : Par nom, statut, statut souscription, devise, mois
+- **Maintenance mensuelle** : migration automatique des souscripteurs `Spécial` vers le mois courant, avec bascule des anciens `En attente` en `Litigieux`
+- **Rappel litigieux** : notification automatique à partir du 7 du mois pour les paiements toujours en retard
+- **Sélecteur de mois** : choix disponible à partir de janvier 2025 dans le formulaire
 - **Interface revue** : fond blanc professionnel, texte plus lisible et tableau des enregistrements agrandi
 
 ## Support technique
 
 Pour toute question, consulter le fichier `INSTALLATION.md` ou contacter le support.
+
+## Configuration WhatsApp
+
+- Le mode WhatsApp est activé uniquement si `config.json` contient `whatsapp_reports.enabled: true`.
+- Les tokens et identifiants API sont lus depuis les variables d'environnement :
+  - `TAP_WHATSAPP_ENABLED`
+  - `TAP_WHATSAPP_MODE`
+  - `TAP_WHATSAPP_TO`
+  - `TAP_WHATSAPP_TOKEN`
+  - `TAP_WHATSAPP_PHONE_NUMBER_ID`
+- Le document `GUIDE_CONFIGURATION_WHATSAPP.md` décrit la configuration complète et la validation.
 
 ## Notes importantes
 
@@ -56,5 +71,5 @@ Pour toute question, consulter le fichier `INSTALLATION.md` ou contacter le supp
 - Le fichier `config.json` doit être dans le même dossier que l'exécutable
 
 ## Version
-- Version : 3.6
-- Date de livraison : 15 juin 2026
+- Version : 3.7
+- Date de livraison : 21 juillet 2026

@@ -4,7 +4,6 @@ from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.ticker as mticker
 from collections import Counter, defaultdict
-import time
 import csv
 
 from tap.config.theme import C, MPL, STATUS_COLORS
@@ -13,55 +12,30 @@ from tap.config.responsive import (
     clamp_window_geometry,
     detect_screen_profile,
 )
-from tap.core.utils import month_sort_key
-from tap.core.auto_status_updater import executer_mise_a_jour_automatique
-from tap.infrastructure.database import (
-    ajouter_paiement_complementaire,
-    get_historique_locataire,
-    get_souscriptions,
-    mettre_a_jour_statut,
-    modifier_souscription,
-    supprimer_souscription,
+from tap.core.utils import (
+    build_month_choices,
+    build_special_rollover_month_choices,
+    format_month_label,
+    month_sort_key,
+    parse_mois_saisie,
 )
+from tap.core.auto_status_updater import (
+    executer_basculement_special_manuel,
+    executer_mise_a_jour_automatique,
+)
+from tap.core.dashboard_service import calculate_dashboard_metrics
+from tap.core.models import HistoryPayment, SubscriptionRecord
+from tap.core.local_signature import start_signature_session
+from tap.core.payment_service import PaymentService, SubscriptionFilters
+from tap.core.whatsapp_reports import send_overdue_payment_reminders
 from tap.presentation.components.widgets import SidebarButton, StatCard
 from tap.presentation.dialogs.export_pdf import ExportPDFDialog
-from tap.presentation.dialogs.formulaire import FormulaireSouscription
+from tap.presentation.dialogs.formulaire import FormulaireSouscription, NouveauSouscripteurDialog
+from tap.presentation.dialogs.archives import DialogArchives
+from tap.presentation.dialogs.signature_qr import SignatureQRDialog
 
 ctk.set_appearance_mode("Light")
 ctk.set_default_color_theme("blue")
-
-
-# ── Cache pour les calculs du dashboard ─────────────────────────────────────
-
-class DashboardCache:
-    """Cache avec TTL pour les calculs coûteux du dashboard"""
-    def __init__(self, ttl=5):
-        self.cache = {}
-        self.ttl = ttl
-        self.hits = 0
-        self.misses = 0
-        
-    def get(self, key, compute_func):
-        if key in self.cache:
-            value, timestamp = self.cache[key]
-            if time.time() - timestamp < self.ttl:
-                self.hits += 1
-                return value
-                
-        self.misses += 1
-        value = compute_func()
-        self.cache[key] = (value, time.time())
-        return value
-    
-    def invalidate(self):
-        """Invalide tout le cache"""
-        self.cache.clear()
-    
-    def get_stats(self):
-        """Retourne les statistiques du cache"""
-        total = self.hits + self.misses
-        hit_rate = (self.hits / total * 100) if total > 0 else 0
-        return f"Cache: {self.hits} hits, {self.misses} misses ({hit_rate:.1f}% hit rate)"
 
 
 # ── StatCard avec animation ─────────────────────────────────────────────────
@@ -160,7 +134,7 @@ class HistoriqueDialog(ctk.CTkToplevel):
         
         self.nom = nom
         self.prenom = prenom
-        self.paiements = paiements
+        self.paiements = [HistoryPayment.from_row(row) for row in paiements]
         self._sort_column = None
         self._sort_reverse = False
         
@@ -267,26 +241,21 @@ class HistoriqueDialog(ctk.CTkToplevel):
 
         for p in self.paiements:
             try:
-                if len(p) >= 9:
-                    total_montant += float(str(p[5]).replace(",", "."))
-                    total_paye += float(str(p[6]).replace(",", "."))
-                    total_reste += float(str(p[7]).replace(",", "."))
-                else:
-                    total_montant += float(str(p[1]).replace(",", "."))
-            except (ValueError, IndexError):
+                total_montant += float(str(p.total_amount).replace(",", "."))
+                total_paye += float(str(p.paid_amount).replace(",", "."))
+                total_reste += float(str(p.remaining_amount).replace(",", "."))
+            except (TypeError, ValueError):
                 pass
-            if len(p) > 4:
-                if p[4] == "En règle":
-                    payes += 1
-                elif p[4] == "Litigieux":
-                    litigieux += 1
-                elif p[4] == "En attente":
-                    attente += 1
-            if len(p) > 8:
-                if p[8] == "Complet":
-                    complets += 1
-                elif p[8] == "Partiel":
-                    partiels += 1
+            if p.status == "En règle":
+                payes += 1
+            elif p.status == "Litigieux":
+                litigieux += 1
+            elif p.status == "En attente":
+                attente += 1
+            if p.payment_status == "Complet":
+                complets += 1
+            elif p.payment_status == "Partiel":
+                partiels += 1
 
         stats = [
             (f"Total: {len(self.paiements)}", C["text_hi"]),
@@ -310,22 +279,22 @@ class HistoriqueDialog(ctk.CTkToplevel):
     def _stat_label(parent, text, color, row=0, column=0):
         """Crée un label de statistique"""
         label = ctk.CTkLabel(parent, text=text,
-                             font=ctk.CTkFont(size=11, weight="bold"),
+                             font=ctk.CTkFont(size=10, weight="bold"),
                              text_color=color)
         label.grid(row=row, column=column, sticky="w", padx=(0, 18), pady=4)
         
     def _build_table(self):
         """Construit le tableau des paiements"""
-        cols = ("Mois", "Montant Total", "Montant Payé", "Reste", "Devise", "Statut Souscription", "Statut", "Statut Paiement")
+        cols = ("Mois", "Montant Total", "Montant Payé", "Reste", "Devise", "Statut Souscription", "Statut des versements", "Statut Paiement")
         self.tree = ttk.Treeview(self.tbl_frame, columns=cols,
                                  show="headings", style="TAP.Treeview")
 
         if self._compact_mode:
-            widths = {"Mois": 96, "Montant Total": 92, "Montant Payé": 92, "Reste": 82,
-                      "Devise": 70, "Statut Souscription": 112, "Statut": 88, "Statut Paiement": 100}
+            widths = {"Mois": 90, "Montant Total": 85, "Montant Payé": 85, "Reste": 75,
+                      "Devise": 60, "Statut Souscription": 100, "Statut des versements": 100, "Statut Paiement": 90}
         else:
-            widths = {"Mois": 120, "Montant Total": 120, "Montant Payé": 120, "Reste": 110,
-                      "Devise": 85, "Statut Souscription": 140, "Statut": 110, "Statut Paiement": 120}
+            widths = {"Mois": 110, "Montant Total": 110, "Montant Payé": 110, "Reste": 100,
+                      "Devise": 75, "Statut Souscription": 130, "Statut des versements": 130, "Statut Paiement": 110}
         anchors = {
             "Mois": "center",
             "Montant Total": "e",
@@ -333,7 +302,7 @@ class HistoriqueDialog(ctk.CTkToplevel):
             "Reste": "e",
             "Devise": "center",
             "Statut Souscription": "center",
-            "Statut": "center",
+            "Statut des versements": "center",
             "Statut Paiement": "center",
         }
 
@@ -342,28 +311,32 @@ class HistoriqueDialog(ctk.CTkToplevel):
                 col, text=col.upper(), anchor=anchors.get(col, "center"),
                 command=lambda c=col: self._sort_by_column(c)
             )
-            self.tree.column(col, width=widths.get(col, 100),
+            self.tree.column(col, width=widths.get(col, 90),
                            anchor=anchors.get(col, "center"),
-                           stretch=col in {"Mois", "Statut Souscription", "Statut", "Statut Paiement"},
-                           minwidth=70)
+                           stretch=col in {"Mois", "Statut Souscription", "Statut des versements", "Statut Paiement"},
+                           minwidth=60)
 
         # Remplir
         for i, paiement in enumerate(self.paiements):
             tag = "even" if i % 2 == 0 else "odd"
-            st = str(paiement[4]) if len(paiement) > 4 else ""
+            st = paiement.status
             status_tag = {"En règle": "paye", "Litigieux": "litige",
                          "En attente": "attente"}.get(st, "")
 
             # Statut paiement tag
-            statut_paiement = str(paiement[8]) if len(paiement) > 8 else "Complet"
+            statut_paiement = paiement.payment_status
             paiement_tag = {"Complet": "complet", "Partiel": "partiel", "En attente": "attente_paiement"}.get(statut_paiement, "")
 
-            # N'afficher que les colonnes nécessaires
-            if len(paiement) >= 9:
-                values = (paiement[0], paiement[5], paiement[6], paiement[7], paiement[2], paiement[3], paiement[4], paiement[8])
-            else:
-                # Fallback pour les anciennes données
-                values = (paiement[0], paiement[1], paiement[1], 0, paiement[2], paiement[3], paiement[4], "Complet")
+            values = (
+                paiement.month,
+                paiement.total_amount,
+                paiement.paid_amount,
+                paiement.remaining_amount,
+                paiement.currency,
+                paiement.subscription_status,
+                paiement.status,
+                paiement.payment_status,
+            )
 
             self.tree.insert("", "end", values=values, tags=(tag, status_tag, paiement_tag))
 
@@ -443,14 +416,12 @@ class HistoriqueDialog(ctk.CTkToplevel):
             with open(filename, 'w', newline='', encoding='utf-8-sig') as f:
                 writer = csv.writer(f, delimiter=';')
                 writer.writerow(["Mois", "Montant Total", "Montant Payé", "Reste à Payer", "Devise",
-                               "Statut Souscription", "Statut", "Statut Paiement"])
-                # Adapter les données pour l'export
+                               "Statut Souscription", "Statut des versements", "Statut Paiement"])
                 for p in self.paiements:
-                    if len(p) >= 9:
-                        row = [p[0], p[5], p[6], p[7], p[2], p[3], p[4], p[8]]
-                    else:
-                        row = [p[0], p[1], p[1], 0, p[2], p[3], p[4], "Complet"]
-                    writer.writerow(row)
+                    writer.writerow([
+                        p.month, p.total_amount, p.paid_amount, p.remaining_amount,
+                        p.currency, p.subscription_status, p.status, p.payment_status,
+                    ])
                 writer.writerow([])
                 writer.writerow(["Filtres", "Aucun filtre individuel dans l'historique", "", "", "", "", "", ""])
 
@@ -508,9 +479,9 @@ class HistoriqueDialog(ctk.CTkToplevel):
         montants = []
         for p in self.paiements:
             try:
-                mois_list.append(str(p[0]))
-                montants.append(float(str(p[1]).replace(",", ".")))
-            except (ValueError, IndexError):
+                mois_list.append(str(p.month))
+                montants.append(float(str(p.amount).replace(",", ".")))
+            except (TypeError, ValueError):
                 pass
         
         if mois_list:
@@ -590,8 +561,7 @@ class AppGestionLoyers(ctk.CTk):
         self._all_data: list = []
         self._row_meta: dict[str, dict] = {}
         
-        # Cache pour les calculs du dashboard
-        self.dash_cache = DashboardCache(ttl=5)
+        self.payment_service = PaymentService()
         
         # Variables d'état
         self.status_var = StringVar(value="Prêt. Connectez-vous aux données ou ajoutez un paiement.")
@@ -622,6 +592,7 @@ class AppGestionLoyers(ctk.CTk):
         self._is_loading = False
         self._loading_after_id = None
         self._maintenance_after_id = None
+        self._startup_maintenance_after_id = None
 
         self._build_sidebar()
         self._build_main()
@@ -634,6 +605,7 @@ class AppGestionLoyers(ctk.CTk):
         self.after(250, self._apply_responsive_layout)
         self._schedule_automatic_maintenance()
         self.charger_donnees()
+        self._startup_maintenance_after_id = self.after(1500, self._run_automatic_maintenance)
 
     # ── Raccourcis clavier ───────────────────────────────────────────────────
     def _setup_keyboard_shortcuts(self):
@@ -714,23 +686,43 @@ class AppGestionLoyers(ctk.CTk):
         nav = ctk.CTkFrame(sb, fg_color="transparent")
         nav.pack(fill="x", padx=16)
 
-        self.sidebar_buttons = [
-            SidebarButton(nav, text="  ➕  Nouveau Paiement",
+        self.btn_nav_nouveau = SidebarButton(nav, text="  ➕  Nouveau Souscripteur",
                           fg_color=C["accent"], hover_color=C["accent_dim"],
                           text_color="#000000", font=ctk.CTkFont(size=13, weight="bold"),
-                          command=self.ouvrir_formulaire),
-            SidebarButton(nav, text="  🔄  Actualiser",
-                          command=self.charger_donnees),
-            SidebarButton(nav, text="  📄  Exporter PDF",
+                          command=self.ouvrir_formulaire)
+        self.btn_nav_records = SidebarButton(nav, text="  📋  Enregistrements",
+                          fg_color=C["bg_section"], hover_color=C["border"],
+                          text_color=C["text_hi"], command=self._show_records_page)
+        self.btn_nav_special = SidebarButton(nav, text="  ⭐  Souscripteurs spéciaux",
+                          fg_color=C["bg_section"], hover_color=C["border"],
+                          text_color=C["text_hi"], command=self._show_special_subscribers_page)
+        self.btn_nav_reminders = SidebarButton(nav, text="  📣  Rappels impayés",
+                          fg_color=C["bg_section"], hover_color=C["border"],
+                          text_color=C["text_hi"], command=self.envoyer_rappels_impayes)
+        self.btn_nav_dashboard = SidebarButton(nav, text="  📊  Tableau de bord",
+                          fg_color=C["bg_section"], hover_color=C["border"],
+                          text_color=C["text_hi"], command=self._show_dashboard_page)
+        self.btn_nav_actualiser = SidebarButton(nav, text="  🔄  Actualiser",
+                          command=self.charger_donnees)
+        self.btn_nav_pdf = SidebarButton(nav, text="  📄  Exporter PDF",
                           fg_color="#FFF4F4", hover_color="#FDECEC",
                           text_color=C["red"],
-                          command=self.generer_pdf),
+                          command=self.generer_pdf)
+
+        self.sidebar_buttons = [
+            self.btn_nav_nouveau,
+            self.btn_nav_records,
+            self.btn_nav_special,
+            self.btn_nav_reminders,
+            self.btn_nav_actualiser,
+            self.btn_nav_pdf,
         ]
+        # btn_nav_dashboard sera affiché uniquement sur la page enregistrements
         for button in self.sidebar_buttons:
             button.pack(fill="x", pady=(0, 8))
 
         ctk.CTkFrame(sb, fg_color="transparent").pack(fill="both", expand=True)
-        self.sidebar_footer = ctk.CTkLabel(sb, text="v3.6  ·  TAP Loyers",
+        self.sidebar_footer = ctk.CTkLabel(sb, text="v3.7  ·  TAP Loyers",
                                            font=ctk.CTkFont(size=10),
                                            text_color=C["text_lo"])
         self.sidebar_footer.pack(pady=20)
@@ -741,7 +733,7 @@ class AppGestionLoyers(ctk.CTk):
         main.pack(side="right", fill="both", expand=True, padx=20, pady=20)
         self.main_frame = main
 
-        # Header
+        # Header commun (toujours visible)
         hdr = ctk.CTkFrame(main, fg_color="transparent")
         hdr.pack(fill="x", pady=(0, 16))
         self.header_title = ctk.CTkLabel(hdr, text="Tableau de bord",
@@ -761,12 +753,12 @@ class AppGestionLoyers(ctk.CTk):
         )
         self.status_bar.pack(fill="x", pady=(0, 12))
 
-        # ── FILTRES GLOBAUX ──────────────────────────────────────────────────
-        self._build_filters(main)
+        # ── PAGE DASHBOARD (visible par défaut) ───────────────────────────────
+        self.page_dashboard = ctk.CTkFrame(main, fg_color="transparent")
+        self.page_dashboard.pack(fill="both", expand=True)
 
-        # ── ONGLETS ──────────────────────────────────────────────────────────
         self.tabs = ctk.CTkTabview(
-            main, fg_color=C["bg_card"],
+            self.page_dashboard, fg_color=C["bg_card"],
             segmented_button_fg_color=C["bg_section"],
             segmented_button_selected_color=C["accent"],
             segmented_button_selected_hover_color=C["accent_dim"],
@@ -779,13 +771,17 @@ class AppGestionLoyers(ctk.CTk):
         )
         self.tabs.pack(fill="both", expand=True)
 
-        tab_table = self.tabs.add("  📋  Tableau  ")
-        tab_dash  = self.tabs.add("  📊  Analyse  ")
-
-        self._build_tab_table(tab_table)
+        tab_dash = self.tabs.add("  📊  Analyse  ")
         self._build_tab_dashboard(tab_dash)
-
         self.tabs.configure(command=self._on_tab_change)
+
+        # ── PAGE ENREGISTREMENTS (cachée par défaut) ───────────────────────────
+        self.page_records = ctk.CTkFrame(main, fg_color="transparent")
+        # Ne pas packer maintenant — cachée par défaut
+
+        # Filtres dans la page enregistrements
+        self._build_filters(self.page_records)
+        self._build_tab_table(self.page_records)
 
     # ── FILTRES GLOBAUX ──────────────────────────────────────────────────────
     def _build_filters(self, parent):
@@ -805,6 +801,8 @@ class AppGestionLoyers(ctk.CTk):
                                          text_color=C["text_lo"])
         self.filters_help.pack(side="left", padx=(12, 0))
 
+        self._build_special_rollover_bar(f)
+
         self.filter_type_row = ctk.CTkFrame(f, fg_color="transparent")
         self.filter_type_row.pack(fill="x", padx=16, pady=(6, 6))
 
@@ -812,7 +810,7 @@ class AppGestionLoyers(ctk.CTk):
                                               font=ctk.CTkFont(size=11),
                                               text_color=C["text_lo"])
         self.filter_type_label.pack(side="left", padx=(0, 6))
-        self.combo_type_filtre = self._combo(self.filter_type_row, ["Nom", "Mois", "Statut", "Statut souscription", "Devise"], "Nom", 170)
+        self.combo_type_filtre = self._combo(self.filter_type_row, ["Nom", "Mois", "Statut des versements", "Statut souscription", "Devise"], "Nom", 170)
         self.combo_type_filtre.configure(command=self._on_filter_type_change)
         self.combo_type_filtre.pack(side="left", padx=(0, 10))
 
@@ -840,6 +838,13 @@ class AppGestionLoyers(ctk.CTk):
                                                text_color=C["text_lo"], corner_radius=6,
                                                command=self._reset_filters)
         self.btn_reset_filters.pack(side="left")
+        
+        # Bouton Archives aligné à droite
+        self.btn_archives = ctk.CTkButton(self.filter_actions_row, text="🗃️ Archives", width=100, height=32,
+                                          fg_color=C["bg_card"], hover_color=C["border"], border_width=1,
+                                          border_color=C["border"], text_color=C["text_hi"],
+                                          corner_radius=6, command=self._show_archives_page)
+        self.btn_archives.pack(side="right")
 
         chips_header = ctk.CTkFrame(f, fg_color="transparent")
         chips_header.pack(fill="x", padx=16, pady=(0, 6))
@@ -851,25 +856,168 @@ class AppGestionLoyers(ctk.CTk):
         self.active_filters_frame.pack(fill="x", padx=16, pady=(0, 12))
         self._refresh_active_filters_ui()
 
+    def _build_special_rollover_bar(self, parent):
+        """Barre de basculement manuel des souscripteurs Spécial."""
+        bar = ctk.CTkFrame(parent, fg_color=C["bg_section"], corner_radius=8)
+        bar.pack(fill="x", padx=16, pady=(0, 10))
+        self.special_rollover_bar = bar
+
+        header = ctk.CTkFrame(bar, fg_color="transparent")
+        header.pack(fill="x", padx=12, pady=(10, 4))
+        ctk.CTkLabel(
+            header,
+            text="Basculement mensuel Spécial",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=C["text_hi"],
+        ).pack(side="left")
+        ctk.CTkLabel(
+            header,
+            text="Choisissez le mois cible, puis lancez le basculement manuellement.",
+            font=ctk.CTkFont(size=10),
+            text_color=C["text_lo"],
+        ).pack(side="left", padx=(10, 0))
+
+        row = ctk.CTkFrame(bar, fg_color="transparent")
+        row.pack(fill="x", padx=12, pady=(0, 10))
+
+        ctk.CTkLabel(
+            row,
+            text="Mois cible",
+            font=ctk.CTkFont(size=11),
+            text_color=C["text_lo"],
+        ).pack(side="left", padx=(0, 8))
+
+        rollover_choices = build_special_rollover_month_choices()
+        default_month = rollover_choices[0] if rollover_choices else ""
+        self.combo_special_rollover_month = self._combo(
+            row,
+            rollover_choices,
+            default_month,
+            260,
+        )
+        self.combo_special_rollover_month.pack(side="left", padx=(0, 10))
+
+        self.btn_special_rollover = ctk.CTkButton(
+            row,
+            text="Basculement mensuel",
+            width=170,
+            height=32,
+            fg_color=C["accent"],
+            hover_color=C["accent_dim"],
+            text_color="#000000",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            corner_radius=6,
+            command=self.lancer_basculement_special_manuel,
+        )
+        self.btn_special_rollover.pack(side="left")
+
+    def lancer_basculement_special_manuel(self):
+        """Duplique les souscripteurs Spécial vers le mois choisi."""
+        mois_label = self.combo_special_rollover_month.get().strip()
+        mois_cible = parse_mois_saisie(mois_label)
+        if not mois_cible:
+            messagebox.showerror(
+                "Basculement Spécial",
+                "Veuillez sélectionner un mois cible valide (à partir de 10/2025).",
+                parent=self,
+            )
+            return
+
+        mois_affiche = format_month_label(mois_cible)
+        if not messagebox.askyesno(
+            "Confirmer le basculement",
+            (
+                f"Basculement manuel des souscripteurs Spécial vers {mois_affiche} ?\n\n"
+                "- Création des lignes du mois choisi pour chaque souscripteur Spécial\n"
+                "- Passage en Litigieux des mois antérieurs encore « En attente »\n"
+                "- Opération journalisée : un second basculement pour le même mois sera refusé"
+            ),
+            parent=self,
+        ):
+            return
+
+        self.btn_special_rollover.configure(state="disabled")
+        self._set_status(f"Basculement Spécial en cours pour {mois_affiche}...")
+        try:
+            rapport = executer_basculement_special_manuel(mois_cible)
+            status = rapport.get("status", "unknown")
+            message = rapport.get("message", "")
+
+            if status == "done":
+                creations = int(rapport.get("created", 0) or 0)
+                details = rapport.get("details") or {}
+                litigieux = int(details.get("overdue_updates", 0) or 0)
+                messagebox.showinfo(
+                    "Basculement terminé",
+                    message
+                    or (
+                        f"Basculement vers {mois_affiche} terminé : "
+                        f"{creations} création(s), {litigieux} passage(s) en Litigieux."
+                    ),
+                    parent=self,
+                )
+                self._set_status(f"Basculement Spécial terminé pour {mois_affiche}.")
+                self.charger_donnees()
+            elif status == "already_done":
+                messagebox.showinfo(
+                    "Basculement déjà effectué",
+                    message or f"Le basculement pour {mois_affiche} a déjà été exécuté.",
+                    parent=self,
+                )
+                self._set_status(message or f"Basculement déjà traité pour {mois_affiche}.")
+            elif status == "running":
+                messagebox.showwarning(
+                    "Basculement en cours",
+                    message or "Une migration est déjà en cours pour ce mois.",
+                    parent=self,
+                )
+                self._set_status(message or "Basculement Spécial déjà en cours.")
+            else:
+                messagebox.showerror(
+                    "Erreur de basculement",
+                    message or "Le basculement Spécial a échoué.",
+                    parent=self,
+                )
+                self._set_status(message or "Erreur lors du basculement Spécial.")
+        except Exception as exc:
+            messagebox.showerror(
+                "Erreur de basculement",
+                f"Impossible d'exécuter le basculement Spécial : {exc}",
+                parent=self,
+            )
+            self._set_status(f"Erreur basculement Spécial : {exc}")
+        finally:
+            self.btn_special_rollover.configure(state="normal")
+
     # ── ONGLET TABLEAU ───────────────────────────────────────────────────────
     def _build_tab_table(self, parent):
-        self.tab_table_body = ctk.CTkScrollableFrame(parent, fg_color="transparent")
-        self.tab_table_body.pack(fill="both", expand=True)
+        self.tab_table_body = ctk.CTkFrame(parent, fg_color="transparent")
+        self.tab_table_body.pack(fill="both", expand=True, padx=10, pady=10)
 
-        # Cartes stats
-        self.table_stats_row = ctk.CTkFrame(self.tab_table_body, fg_color="transparent")
-        self.table_stats_row.pack(fill="x", pady=(8, 12))
-        self.table_stats_row.columnconfigure((0, 1, 2, 3), weight=1, uniform="c")
+        # Diviser en deux: gauche pour les stats, droite pour le tableau
+        self.left_pane = ctk.CTkFrame(self.tab_table_body, fg_color="transparent", width=250)
+        self.left_pane.pack(side="left", fill="y", padx=(0, 10))
+        
+        self.right_pane = ctk.CTkFrame(self.tab_table_body, fg_color="transparent")
+        self.right_pane.pack(side="right", fill="both", expand=True)
 
-        self.card_total     = StatCard(self.table_stats_row, "📋", "Total",         C["blue"])
-        self.card_payes     = StatCard(self.table_stats_row, "✅", "En règle",          C["green"])
-        self.card_litigieux = StatCard(self.table_stats_row, "⚠️", "Litigieux",      C["orange"])
-        self.card_attente   = StatCard(self.table_stats_row, "⏳", "En attente",     C["text_lo"])
+        # Cartes stats verticales
+        self.table_stats_col = ctk.CTkFrame(self.left_pane, fg_color="transparent")
+        self.table_stats_col.pack(fill="x", pady=(8, 12))
+
+        self.card_total     = StatCard(self.table_stats_col, "📋", "Total",         C["blue"])
+        self.card_payes     = StatCard(self.table_stats_col, "✅", "En règle",          C["green"])
+        self.card_litigieux = StatCard(self.table_stats_col, "⚠️", "Litigieux",      C["orange"])
+        self.card_attente   = StatCard(self.table_stats_col, "⏳", "En attente",     C["text_lo"])
         self.table_cards = [self.card_total, self.card_payes, self.card_litigieux, self.card_attente]
-        self._layout_table_cards(4)
+        
+        for card in self.table_cards:
+            card.pack(fill="x", pady=(0, 10))
+            if hasattr(card, "set_density"):
+                card.set_density(value_size=26, label_size=11, sub_size=10, icon_size=12)
 
         # Header compteur
-        tbl_hdr = ctk.CTkFrame(self.tab_table_body, fg_color="transparent")
+        tbl_hdr = ctk.CTkFrame(self.right_pane, fg_color="transparent")
         tbl_hdr.pack(fill="x", padx=4, pady=(0, 6))
         ctk.CTkLabel(tbl_hdr, text="Enregistrements",
                      font=ctk.CTkFont(size=13, weight="bold"),
@@ -880,24 +1028,24 @@ class AppGestionLoyers(ctk.CTk):
         self.lbl_count.pack(side="right")
 
         self.lbl_table_hint = ctk.CTkLabel(
-            self.tab_table_body,
-            text="Astuce : double-clic pour l'historique, clic droit pour changer le statut.",
-            font=ctk.CTkFont(size=10),
+            self.right_pane,
+            text="Page dédiée aux enregistrements : double-clic pour l'historique, clic droit pour changer le statut.",
+            font=ctk.CTkFont(size=11),
             text_color=C["text_lo"],
         )
         self.lbl_table_hint.pack(anchor="w", padx=4, pady=(0, 6))
 
         # Treeview
-        tbl_inner = ctk.CTkFrame(parent, fg_color=C["bg_section"],
+        tbl_inner = ctk.CTkFrame(self.right_pane, fg_color=C["bg_card"],
                                   corner_radius=8, border_width=1,
                                   border_color=C["border"])
         tbl_inner.pack(fill="both", expand=True)
 
-        cols = ("Nom", "Prénom", "Mois", "Montant", "Devise", "Statut Souscription", "Statut")
+        cols = ("Nom", "Prénom", "Mois", "Montant", "Devise", "Statut Souscription", "Statut des versements", "Signé")
         self.tableau = ttk.Treeview(tbl_inner, columns=cols, show="headings",
-                                    style="TAP.Treeview", height=5)
-        widths = {"Nom": 210, "Prénom": 190, "Mois": 140,
-                  "Montant": 130, "Devise": 95, "Statut Souscription": 170, "Statut": 120}
+                                    style="TAP.Treeview", height=8)
+        widths = {"Nom": 230, "Prénom": 205, "Mois": 150,
+                  "Montant": 140, "Devise": 100, "Statut Souscription": 180, "Statut": 130, "Signé": 105}
         anchors = {
             "Nom": "w",
             "Prénom": "w",
@@ -905,7 +1053,8 @@ class AppGestionLoyers(ctk.CTk):
             "Montant": "e",
             "Devise": "center",
             "Statut Souscription": "center",
-            "Statut": "center",
+            "Statut des versements": "center",
+            "Signé": "center",
         }
         for col in cols:
             self.tableau.heading(col, text=col.upper(), anchor=anchors.get(col, "center"))
@@ -935,6 +1084,8 @@ class AppGestionLoyers(ctk.CTk):
                                        command=self.modifier_paiement)
         self.context_menu.add_command(label="  💰  Ajouter paiement",
                                        command=self.ajouter_paiement)
+        self.context_menu.add_command(label="  ✍️  Demander signature QR",
+                                       command=self.demander_signature_qr)
         self.context_menu.add_separator()
         self.context_menu.add_command(label="  ✅  Marquer En règle",
                                        command=lambda: self.modifier_statut("En règle"))
@@ -1049,12 +1200,12 @@ class AppGestionLoyers(ctk.CTk):
     def _apply_table_style(self):
         self._table_style = ttk.Style()
         self._table_style.theme_use("default")
-        self._table_style.configure("TAP.Treeview", background=C["bg_section"], foreground=C["text_hi"],
-                                    rowheight=40, fieldbackground=C["bg_section"],
-                                    borderwidth=0, font=("Segoe UI", 11))
+        self._table_style.configure("TAP.Treeview", background=C["bg_card"], foreground=C["text_hi"],
+                                    rowheight=44, fieldbackground=C["bg_card"],
+                                    borderwidth=0, font=("Segoe UI", 10))
         self._table_style.configure("TAP.Treeview.Heading", background=C["tbl_head"],
                                     foreground=C["text_lo"], relief="flat",
-                                    font=("Segoe UI", 10, "bold"), padding=(10, 12))
+                                    font=("Segoe UI", 10, "bold"), padding=(12, 14))
         self._table_style.map("TAP.Treeview",
                               background=[("selected", C["tbl_select"])],
                               foreground=[("selected", C["text_hi"])])
@@ -1233,36 +1384,7 @@ class AppGestionLoyers(ctk.CTk):
                 pass
 
     def _layout_table_cards(self, columns: int):
-        if self._current_table_card_columns == columns:
-            return
-
-        for card in self.table_cards:
-            card.grid_forget()
-
-        for index in range(columns):
-            self.table_stats_row.columnconfigure(index, weight=1, uniform="c")
-        for index in range(columns, 4):
-            self.table_stats_row.columnconfigure(index, weight=0, minsize=0)
-
-        self.table_stats_row.rowconfigure(0, weight=1)
-        self.table_stats_row.rowconfigure(1, weight=1 if columns < 4 else 0)
-
-        if columns >= 4:
-            positions = [(0, index, 1) for index in range(4)]
-        else:
-            positions = [(index // 2, index % 2, 1) for index in range(4)]
-
-        for card, (row, column, columnspan) in zip(self.table_cards, positions):
-            card.grid(row=row, column=column, columnspan=columnspan, sticky="nsew",
-                      padx=(0, 10) if columnspan == 1 and column < columns - 1 else 0,
-                      pady=(0, 10) if columns < 4 else 0)
-            if hasattr(card, "set_density"):
-                if columns == 1:
-                    card.set_density(value_size=22, label_size=10, sub_size=9, icon_size=11)
-                elif columns == 2:
-                    card.set_density(value_size=24, label_size=10, sub_size=9, icon_size=11)
-                else:
-                    card.set_density(value_size=26, label_size=11, sub_size=10, icon_size=12)
+        pass
 
         self._current_table_card_columns = columns
 
@@ -1336,15 +1458,86 @@ class AppGestionLoyers(ctk.CTk):
                 self.after_cancel(self._maintenance_after_id)
             except Exception:
                 pass
-        self._maintenance_after_id = self.after(60 * 60 * 1000, self._run_automatic_maintenance)
+        self._maintenance_after_id = self.after(30 * 60 * 1000, self._run_automatic_maintenance)
 
     def _run_automatic_maintenance(self):
         """Relance la maintenance automatique et la replanifie."""
         self._maintenance_after_id = None
         try:
-            executer_mise_a_jour_automatique()
+            rapport = executer_mise_a_jour_automatique()
+
+            message_statut = "🔄 Maintenance automatique effectuée."
+            notifications = []
+            quiet_notes = []
+
+            rollover_status = rapport.get("rollover_special_status")
+            rollover_month = rapport.get("rollover_special_month") or rapport.get("date", "")
+            if rollover_status == "manual_only":
+                pass
+            elif rollover_status == "done":
+                rollover_message = rapport.get("rollover_special_message")
+                if rollover_message:
+                    notifications.append(rollover_message)
+                else:
+                    creations = int(rapport.get("creations_speciales", 0) or 0)
+                    notifications.append(
+                        f"Migration mensuelle terminée pour {rollover_month} : "
+                        f"{creations} souscripteur(s) spécial(aux) dupliqué(s)."
+                    )
+            elif rollover_status == "already_done":
+                quiet_notes.append(f"Migration mensuelle déjà traitée pour {rollover_month}.")
+
+            reminder_count = int(rapport.get("litigieux_reminder_count", 0) or 0)
+            reminder_status = rapport.get("litigieux_reminder_status")
+            reminder_month = rapport.get("litigieux_reminder_month") or rapport.get("date", "")
+            if reminder_status == "done" and reminder_count > 0:
+                reminder_message = rapport.get("litigieux_reminder_message")
+                if reminder_message:
+                    notifications.append(reminder_message)
+                else:
+                    reminder_details = rapport.get("litigieux_reminder_details", {})
+                    reminder_sample = reminder_details.get("sample", [])
+                    reminder_text = (
+                        f"Rappel litigieux pour {reminder_month} : "
+                        f"{reminder_count} paiement(s) encore à traiter."
+                    )
+                    if reminder_sample:
+                        reminder_text += "\n\nExemples:\n" + "\n".join(
+                            f"- {item}" for item in reminder_sample[:5]
+                        )
+                    notifications.append(reminder_text)
+            elif reminder_status == "already_done" and reminder_count > 0:
+                quiet_notes.append(f"Rappel litigieux déjà envoyé pour {reminder_month}.")
+
+            if rapport.get("erreurs", 0):
+                message_statut = f"⚠️ Maintenance terminée avec {rapport['erreurs']} erreur(s)."
+                if notifications:
+                    message_statut += " " + " | ".join(notifications)
+                if quiet_notes:
+                    message_statut += " " + " | ".join(quiet_notes)
+                self.after(
+                    0,
+                    lambda msg=message_statut: messagebox.showwarning(
+                        "Maintenance automatique",
+                        msg,
+                    ),
+                )
+            elif notifications:
+                message_statut = "📣 " + " | ".join(notifications)
+                if quiet_notes:
+                    message_statut += " | " + " | ".join(quiet_notes)
+                self.after(
+                    0,
+                    lambda msg=message_statut: messagebox.showinfo(
+                        "Maintenance automatique",
+                        msg,
+                    ),
+                )
+            elif quiet_notes:
+                message_statut = "ℹ️ " + " | ".join(quiet_notes)
+
             if not self._is_loading:
-                self._set_status("🔄 Maintenance automatique effectuée.")
+                self._set_status(message_statut)
         except Exception as e:
             self._set_status(f"⚠️ Maintenance automatique en erreur: {e}")
         finally:
@@ -1353,7 +1546,18 @@ class AppGestionLoyers(ctk.CTk):
 
     # ── LOGIQUE PRINCIPALE ───────────────────────────────────────────────────
     def ouvrir_formulaire(self):
-        FormulaireSouscription(self, callback_maj_tableau=self.charger_donnees)
+        def _apres_creation(details=None):
+            """Recharge les données et navigue vers la page enregistrements."""
+            self._show_records_page()
+            if details and self._montant_positif(details.get("montant_paye", 0)):
+                paiement_id = details.get("paiement_id")
+                if paiement_id:
+                    self._ouvrir_signature_apres_paiement(
+                        paiement_id,
+                        details.get("montant_paye"),
+                    )
+
+        NouveauSouscripteurDialog(self, callback_maj_tableau=_apres_creation)
 
     def charger_donnees(self):
         if self._is_loading:
@@ -1363,18 +1567,21 @@ class AppGestionLoyers(ctk.CTk):
         self.update_idletasks()
         
         try:
-            lignes = get_souscriptions(
-                self.active_filters["nom"],
-                self.active_filters["statut"],
-                self.active_filters["devise"],
-                self.active_filters["mois"],
-                self.active_filters["statut_souscription"],
-            )
+            lignes = [
+                SubscriptionRecord.from_row(row)
+                for row in self.payment_service.list_subscriptions(
+                    SubscriptionFilters(
+                        name=self.active_filters["nom"],
+                        status=self.active_filters["statut"],
+                        currency=self.active_filters["devise"],
+                        month=self.active_filters["mois"],
+                        subscription_status=self.active_filters["statut_souscription"],
+                    )
+                )
+            ]
 
             self._all_data = lignes
             self._row_meta.clear()
-            self.dash_cache.invalidate()
-
             # ── Remplir le tableau par lots
             items = self.tableau.get_children()
             if items:
@@ -1383,32 +1590,26 @@ class AppGestionLoyers(ctk.CTk):
             batch_size = 100
             for i in range(0, len(lignes), batch_size):
                 batch = lignes[i:i+batch_size]
-                for j, ligne in enumerate(batch):
+                for j, record in enumerate(batch):
                     idx = i + j
-                    paiement_id = ligne[0]
-                    locataire_id = ligne[1]
-                    valeurs_visibles = ligne[2:9]
+                    paiement_id = record.payment_id
+                    valeurs_visibles = (
+                        record.last_name,
+                        record.first_name,
+                        record.month,
+                        record.amount,
+                        record.currency,
+                        record.subscription_status,
+                        record.status,
+                        "✓ Signé" if record.is_signed else "—",
+                    )
                     tag = "even" if idx % 2 == 0 else "odd"
-                    sv  = str(ligne[8]) if len(ligne) > 8 else ""
+                    sv = record.status
                     st  = {"En règle": "paye", "Litigieux": "litige",
                            "En attente": "attente"}.get(sv, "")
                     item_id = str(paiement_id)
                     self.tableau.insert("", "end", iid=item_id, values=valeurs_visibles, tags=(tag, st))
-                    self._row_meta[item_id] = {
-                        "paiement_id": paiement_id,
-                        "locataire_id": locataire_id,
-                        "nom": ligne[2],
-                        "prenom": ligne[3],
-                        "mois": ligne[4],
-                        "montant": ligne[5],
-                        "devise": ligne[6],
-                        "statut_souscription": ligne[7],
-                        "statut": ligne[8],
-                        "montant_total": ligne[9] if len(ligne) > 9 else ligne[5],
-                        "montant_paye": ligne[10] if len(ligne) > 10 else ligne[5],
-                        "reste_a_payer": ligne[11] if len(ligne) > 11 else 0,
-                        "statut_paiement": ligne[12] if len(ligne) > 12 else "Complet",
-                    }
+                    self._row_meta[item_id] = record.to_metadata()
                 self.update_idletasks()
 
             if lignes:
@@ -1425,9 +1626,9 @@ class AppGestionLoyers(ctk.CTk):
 
             # ── Stats cartes tableau
             total     = len(lignes)
-            payes     = sum(1 for l in lignes if len(l) > 8 and l[8] == "En règle")
-            litigieux = sum(1 for l in lignes if len(l) > 8 and l[8] == "Litigieux")
-            attente   = sum(1 for l in lignes if len(l) > 8 and l[8] == "En attente")
+            payes     = sum(1 for record in lignes if record.status == "En règle")
+            litigieux = sum(1 for record in lignes if record.status == "Litigieux")
+            attente   = sum(1 for record in lignes if record.status == "En attente")
             self.card_total.update(total)
             self.card_payes.update(payes)
             self.card_litigieux.update(litigieux)
@@ -1455,7 +1656,7 @@ class AppGestionLoyers(ctk.CTk):
         lignes = self._all_data
         
         if devise_filtre != "Toutes":
-            lignes = [l for l in lignes if str(l[6]).upper() == devise_filtre.upper()]
+            lignes = [record for record in lignes if record.currency.upper() == devise_filtre.upper()]
         
         self._update_dashboard(lignes)
     
@@ -1466,37 +1667,20 @@ class AppGestionLoyers(ctk.CTk):
 
     def _update_dashboard(self, lignes: list):
         """Recalcule les KPIs et redessine les graphiques."""
-        montants = []
-        for l in lignes:
-            try:
-                montants.append(float(str(l[5]).replace(",", ".")))
-            except (ValueError, IndexError):
-                pass
-
-        devises = sorted({str(l[6]).upper() for l in lignes if len(l) > 6 and str(l[6]).strip()})
-        devise_unique = devises[0] if len(devises) == 1 else ""
-        devises_multiples = len(devises) > 1
-
-        # Calculs avec cache
-        total_m   = self.dash_cache.get("total_m", lambda: sum(montants))
-        moy_m     = self.dash_cache.get("moy_m", lambda: total_m / len(montants) if montants else 0)
-        max_m     = self.dash_cache.get("max_m", lambda: max(montants) if montants else 0)
-        count     = len(lignes)
-
-        # Mois le plus actif
-        ctr_mois  = Counter(str(l[4]) for l in lignes)
-        top_mois  = ctr_mois.most_common(1)[0] if ctr_mois else ("—", 0)
+        metrics = calculate_dashboard_metrics(lignes)
+        devise_unique = metrics.currencies[0] if len(metrics.currencies) == 1 else ""
+        devises_multiples = metrics.has_multiple_currencies
 
         if devises_multiples:
-            self.kpi_montant_total.update("—", f"{len(devises)} devises")
+            self.kpi_montant_total.update("—", f"{len(metrics.currencies)} devises")
             self.kpi_moyenne.update("—", "Filtrer une devise")
             self.kpi_max.update("—", "Filtrer une devise")
         else:
-            self.kpi_montant_total.update(f"{total_m:,.0f}", devise_unique)
-            self.kpi_moyenne.update(f"{moy_m:,.0f}", devise_unique)
-            self.kpi_max.update(f"{max_m:,.0f}", devise_unique)
-        self.kpi_mois_actif.update(top_mois[0], f"{top_mois[1]} paiement(s)")
-        self.kpi_count.update(count, "paiements")
+            self.kpi_montant_total.update(f"{metrics.total_amount:,.0f}", devise_unique)
+            self.kpi_moyenne.update(f"{metrics.average_amount:,.0f}", devise_unique)
+            self.kpi_max.update(f"{metrics.maximum_amount:,.0f}", devise_unique)
+        self.kpi_mois_actif.update(metrics.busiest_month, f"{metrics.busiest_month_count} paiement(s)")
+        self.kpi_count.update(metrics.count, "paiements")
 
         self._draw_bar_chart(lignes, devise_unique, devises_multiples)
         self._draw_pie_chart(lignes)
@@ -1522,10 +1706,10 @@ class AppGestionLoyers(ctk.CTk):
 
         # Agréger montants par mois
         sums: dict = defaultdict(float)
-        for l in lignes:
+        for record in lignes:
             try:
-                sums[str(l[4])] += float(str(l[5]).replace(",", "."))
-            except (ValueError, IndexError):
+                sums[str(record.month)] += float(str(record.amount).replace(",", "."))
+            except (TypeError, ValueError):
                 pass
 
         if not sums:
@@ -1577,7 +1761,7 @@ class AppGestionLoyers(ctk.CTk):
         ax.set_facecolor(MPL["bg"])
         self._fig_pie.patch.set_facecolor(MPL["bg"])
 
-        counts = Counter(str(l[8]) for l in lignes if len(l) > 8)
+        counts = Counter(record.status for record in lignes)
         if not counts:
             ax.text(0.5, 0.5, "Aucune donnée", ha="center", va="center",
                     color=MPL["text"], fontsize=12, transform=ax.transAxes)
@@ -1613,6 +1797,61 @@ class AppGestionLoyers(ctk.CTk):
         if "Analyse" in tab:
             self._update_dashboard_with_filter()
 
+    def _show_records_page(self):
+        """Bascule vers la page des enregistrements intégrée."""
+        # Cacher la page dashboard
+        self.page_dashboard.pack_forget()
+        # Afficher la page enregistrements
+        self.page_records.pack(fill="both", expand=True)
+        # Mettre à jour le header
+        self.header_title.configure(text="Enregistrements")
+        self.header_subtitle.configure(text="Liste des souscriptions & paiements")
+        # Mettre à jour la sidebar : afficher le bouton retour, masquer le bouton enregistrements
+        self.btn_nav_records.pack_forget()
+        self.btn_nav_dashboard.pack(fill="x", pady=(0, 8), before=self.btn_nav_actualiser)
+        # Recharger les données pour que le tableau soit à jour
+        self.charger_donnees()
+
+    def _show_special_subscribers_page(self):
+        """Affiche directement les souscripteurs dont le statut est Spécial."""
+        self.active_filters = {
+            "nom": "",
+            "mois": "",
+            "statut": "Tous",
+            "statut_souscription": "Spécial",
+            "devise": "Toutes",
+        }
+        self.combo_type_filtre.set("Statut souscription")
+        self._build_filter_value_widget("Statut souscription")
+        self.filter_value_widget.set("Spécial")
+        self._refresh_active_filters_ui()
+        self._show_records_page()
+        self.header_title.configure(text="Souscripteurs spéciaux")
+        self.header_subtitle.configure(
+            text="Basculement manuel du mois via la barre ci-dessous (à partir de 10/2025)"
+        )
+        self._set_status("⭐ Souscripteurs spéciaux affichés — choisissez le mois cible pour basculer.")
+
+    def _show_dashboard_page(self):
+        """Bascule vers la page du tableau de bord."""
+        # Cacher la page enregistrements
+        self.page_records.pack_forget()
+        # Afficher la page dashboard
+        self.page_dashboard.pack(fill="both", expand=True)
+        # Mettre à jour le header
+        self.header_title.configure(text="Tableau de bord")
+        self.header_subtitle.configure(text="Souscriptions & Paiements")
+        # Mettre à jour la sidebar : afficher le bouton enregistrements, masquer le bouton retour
+        self.btn_nav_dashboard.pack_forget()
+        self.btn_nav_records.pack(fill="x", pady=(0, 8), before=self.btn_nav_actualiser)
+
+    def _show_archives_page(self):
+        """Affiche une boîte de dialogue pour les archives."""
+        try:
+            DialogArchives(self)
+        except Exception as e:
+            messagebox.showerror("Erreur", f"Impossible d'ouvrir les archives: {e}")
+
     def _reset_filters(self):
         self.active_filters = {
             "nom": "",
@@ -1637,16 +1876,37 @@ class AppGestionLoyers(ctk.CTk):
             if values:
                 self._set_status(f"Statut prêt à modifier : {values[0]} {values[1] if len(values) > 1 else ''}".strip())
 
+    def _get_selected_row(self):
+        """Retourne l'identifiant et les métadonnées de la ligne sélectionnée."""
+        item_id = getattr(self, "selected_item", None)
+        if item_id and self.tableau.exists(item_id):
+            meta = self._row_meta.get(str(item_id))
+            if meta:
+                return item_id, meta
+
+        selection = self.tableau.selection()
+        if selection:
+            item_id = selection[0]
+            self.selected_item = item_id
+            meta = self._row_meta.get(str(item_id))
+            if meta:
+                return item_id, meta
+
+        return None, None
+
     def modifier_statut(self, nouveau_statut: str):
-        if not hasattr(self, "selected_item"):
+        if nouveau_statut not in {"En règle", "Litigieux", "En attente"}:
+            messagebox.showerror("Erreur", f"Statut invalide : {nouveau_statut}")
             return
-        meta = self._row_meta.get(str(self.selected_item))
-        if not meta:
+
+        item_id, meta = self._get_selected_row()
+        if not item_id or not meta:
+            messagebox.showwarning("Avertissement", "Veuillez sélectionner un paiement.")
             return
 
         self._show_loading("Mise à jour du statut...")
         try:
-            success, message = mettre_a_jour_statut(
+            success, message = self.payment_service.update_status(
                 meta["paiement_id"], nouveau_statut)
             if success:
                 # Animation flash sur l'item modifié
@@ -1657,13 +1917,18 @@ class AppGestionLoyers(ctk.CTk):
                 }
                 if nouveau_statut in status_colors:
                     self.tableau.tag_configure("flash", background=status_colors[nouveau_statut])
-                    current_tags = list(self.tableau.item(self.selected_item, "tags"))
+                    current_tags = list(self.tableau.item(item_id, "tags"))
                     current_tags.append("flash")
-                    self.tableau.item(self.selected_item, tags=tuple(current_tags))
-                    self.after(500, lambda: self._reset_item_flash(self.selected_item))
+                    self.tableau.item(item_id, tags=tuple(current_tags))
+                    self.after(500, lambda item=item_id: self._reset_item_flash(item))
 
                 self.charger_donnees()
-                self._set_status(f"✅ {message}")
+                if meta.get("statut") != nouveau_statut:
+                    self._set_status(
+                        f"✅ {meta['nom']} {meta['prenom']} : {meta.get('statut', '')} → {nouveau_statut}"
+                    )
+                else:
+                    self._set_status(f"ℹ️ {meta['nom']} {meta['prenom']} est déjà en {nouveau_statut}.")
             else:
                 messagebox.showerror("Erreur", message)
                 self._set_status("❌ La mise à jour du statut a échoué.")
@@ -1682,45 +1947,37 @@ class AppGestionLoyers(ctk.CTk):
 
     def modifier_paiement(self):
         """Ouvre le formulaire de modification pour le paiement sélectionné"""
-        if not hasattr(self, "selected_item"):
+        item_id, meta = self._get_selected_row()
+        if not item_id or not meta:
             messagebox.showwarning("Avertissement", "Veuillez sélectionner un paiement à modifier.")
-            return
-
-        meta = self._row_meta.get(str(self.selected_item))
-        if not meta:
-            messagebox.showerror("Erreur", "Impossible de trouver les données du paiement.")
             return
 
         # Récupérer les données complètes du paiement
         paiement_id = meta["paiement_id"]
-        donnees = (
-            paiement_id,
-            meta["locataire_id"],
-            meta["nom"],
-            meta["prenom"],
-            meta["mois"],
-            meta["montant"],
-            meta["devise"],
-            meta["statut_souscription"],
-            meta["statut"],
-            meta.get("montant_total", meta["montant"]),
-            meta.get("montant_paye", meta["montant"]),
-            meta.get("reste_a_payer", 0),
-            meta.get("statut_paiement", "Complet"),
+        record = SubscriptionRecord(
+            payment_id=meta["paiement_id"],
+            tenant_id=meta["locataire_id"],
+            last_name=meta["nom"],
+            first_name=meta["prenom"],
+            month=meta["mois"],
+            amount=meta["montant"],
+            currency=meta["devise"],
+            subscription_status=meta["statut_souscription"],
+            status=meta["statut"],
+            total_amount=meta.get("montant_total", meta["montant"]),
+            paid_amount=meta.get("montant_paye", 0),
+            remaining_amount=meta.get("reste_a_payer", 0),
+            payment_status=meta.get("statut_paiement", "En attente"),
         )
 
         # Ouvrir le formulaire en mode édition
-        FormulaireSouscription(self, self.charger_donnees, paiement_id, donnees)
+        FormulaireSouscription(self, self.charger_donnees, paiement_id, record.to_edit_tuple())
 
     def supprimer_paiement(self):
         """Supprime le paiement sélectionné après confirmation"""
-        if not hasattr(self, "selected_item"):
+        item_id, meta = self._get_selected_row()
+        if not item_id or not meta:
             messagebox.showwarning("Avertissement", "Veuillez sélectionner un paiement à supprimer.")
-            return
-
-        meta = self._row_meta.get(str(self.selected_item))
-        if not meta:
-            messagebox.showerror("Erreur", "Impossible de trouver les données du paiement.")
             return
 
         paiement_id = meta["paiement_id"]
@@ -1737,7 +1994,7 @@ class AppGestionLoyers(ctk.CTk):
         if reponse:
             self._show_loading("Suppression du paiement...")
             try:
-                success, message = supprimer_souscription(paiement_id)
+                success, message = self.payment_service.delete(paiement_id)
                 if success:
                     self.charger_donnees()
                     self._set_status(f"✅ {message}")
@@ -1749,13 +2006,9 @@ class AppGestionLoyers(ctk.CTk):
 
     def ajouter_paiement(self):
         """Ajoute un paiement complémentaire au paiement sélectionné"""
-        if not hasattr(self, "selected_item"):
+        item_id, meta = self._get_selected_row()
+        if not item_id or not meta:
             messagebox.showwarning("Avertissement", "Veuillez sélectionner un paiement.")
-            return
-
-        meta = self._row_meta.get(str(self.selected_item))
-        if not meta:
-            messagebox.showerror("Erreur", "Impossible de trouver les données du paiement.")
             return
 
         paiement_id = meta["paiement_id"]
@@ -1766,8 +2019,11 @@ class AppGestionLoyers(ctk.CTk):
         montant_paye = meta.get("montant_paye", meta["montant"])
         reste_a_payer = meta.get("reste_a_payer", 0)
 
-        # Si le paiement est déjà complet, informer l'utilisateur
-        if reste_a_payer <= 0:
+        statut_souscription = meta.get("statut_souscription", "Simple")
+
+        # Pour un souscripteur Spécial, le paiement peut devoir solder un mois
+        # antérieur même si la ligne sélectionnée est déjà complète.
+        if reste_a_payer <= 0 and statut_souscription != "Spécial":
             messagebox.showinfo("Information", f"Le paiement de {nom} {prenom} pour {mois} est déjà complet.\n\nMontant total : {montant_total}\nMontant payé : {montant_paye}")
             return
 
@@ -1778,24 +2034,97 @@ class AppGestionLoyers(ctk.CTk):
             f"Montant à ajouter pour {nom} {prenom}\n\n"
             f"Montant total : {montant_total}\n"
             f"Déjà payé : {montant_paye}\n"
-            f"Reste à payer : {reste_a_payer}\n\n"
+            f"Reste à payer sur cette ligne : {reste_a_payer}\n"
+            f"Pour une souscription Spéciale, le montant sera affecté au plus ancien mois impayé.\n\n"
             f"Entrez le montant à ajouter :",
             minvalue=0.01,
-            maxvalue=float(reste_a_payer)
         )
 
         if montant_additionnel is not None:
             self._show_loading("Ajout du paiement...")
             try:
-                success, message = ajouter_paiement_complementaire(paiement_id, montant_additionnel)
+                success, message = self.payment_service.add_payment(paiement_id, montant_additionnel)
                 if success:
                     self.charger_donnees()
                     self._set_status(f"✅ {message}")
+                    self._ouvrir_signature_apres_paiement(paiement_id, montant_additionnel)
                 else:
                     messagebox.showerror("Erreur", message)
                     self._set_status("❌ L'ajout du paiement a échoué.")
             finally:
                 self._hide_loading()
+
+    @staticmethod
+    def _montant_positif(value) -> bool:
+        try:
+            return float(str(value).replace(",", ".")) > 0
+        except (TypeError, ValueError):
+            return False
+
+    def _ouvrir_signature_apres_paiement(self, paiement_id: int, montant_versement=None):
+        meta = self._row_meta.get(str(paiement_id))
+        if not meta:
+            return
+        if montant_versement is not None:
+            meta = dict(meta)
+            meta["montant_versement"] = montant_versement
+        if not messagebox.askyesno(
+            "Signature du reçu",
+            "Le paiement est enregistré.\n\nVoulez-vous faire signer le reçu maintenant ?",
+            parent=self,
+        ):
+            return
+        self._demarrer_signature_qr(meta)
+
+    def demander_signature_qr(self):
+        """Ouvre une demande de signature locale pour le paiement sélectionné."""
+        item_id, meta = self._get_selected_row()
+        if not item_id or not meta:
+            messagebox.showwarning("Avertissement", "Veuillez sélectionner un paiement.")
+            return
+
+        if not self._montant_positif(meta.get("montant_paye", 0)):
+            messagebox.showwarning(
+                "Signature non disponible",
+                "La signature du reçu est possible seulement quand un paiement a été enregistré.",
+                parent=self,
+            )
+            return
+        if meta.get("est_signe"):
+            messagebox.showinfo(
+                "Reçu déjà signé",
+                "Ce paiement possède déjà une signature.",
+                parent=self,
+            )
+            return
+        self._demarrer_signature_qr(meta)
+
+    def _demarrer_signature_qr(self, meta: dict):
+        """Démarre la signature QR pour un paiement déjà payé."""
+        # Assurez-vous d'ajouter le montant_paye actuel comme montant_paye_signature
+        # pour qu'il soit inclus dans le payload de la signature et utilisé pour la mise à jour.
+        meta["montant_paye_signature"] = meta["montant_paye"]
+        try:
+            session = start_signature_session(meta)
+            self._set_status(
+                f"Signature QR prête pour {meta['nom']} {meta['prenom']}."
+            )
+            SignatureQRDialog(
+                self,
+                session,
+                on_signed=lambda: self._apres_signature_recue(meta),
+            )
+        except Exception as exc:
+            messagebox.showerror(
+                "Signature numérique",
+                f"Impossible de créer la signature QR : {exc}",
+                parent=self,
+            )
+            self._set_status("Impossible de créer la signature QR.")
+
+    def _apres_signature_recue(self, meta: dict):
+        self.charger_donnees()
+        self._set_status(f"Signature enregistrée pour {meta['nom']} {meta['prenom']}.")
 
     def afficher_historique_locataire(self, event=None):
         """Affiche l'historique des paiements d'un locataire au double-clic"""
@@ -1806,18 +2135,20 @@ class AppGestionLoyers(ctk.CTk):
             selection = self.tableau.selection()
             item = selection[0] if selection else ""
         if not item:
-            return
+            item, meta = self._get_selected_row()
+            if not item or not meta:
+                return
+        else:
+            meta = self._row_meta.get(str(item))
+            if not meta:
+                return
         
-        values = self.tableau.item(item)["values"]
-        nom = values[0]
-        prenom = values[1]
-        meta = self._row_meta.get(str(item))
-        if not meta:
-            return
+        nom = meta["nom"]
+        prenom = meta["prenom"]
         
         self._show_loading(f"Chargement de l'historique de {nom} {prenom}...")
         try:
-            paiements = get_historique_locataire(meta["locataire_id"])
+            paiements = self.payment_service.history(meta["locataire_id"])
             HistoriqueDialog(self, nom, prenom, paiements)
             self._set_status(f"📋 Historique ouvert pour {nom} {prenom}.")
 
@@ -1831,8 +2162,54 @@ class AppGestionLoyers(ctk.CTk):
         # Récupérer les données actuellement affichées dans le tableau
         lignes = [self.tableau.item(c)["values"] for c in self.tableau.get_children()]
         description_filtres = self._describe_active_filters()
-        self._set_status("📄 Préparation de l'export PDF...")
+        self._set_status("📄 Préparation de l’export PDF...")
         ExportPDFDialog(self, table_data=lignes, filter_summary=description_filtres)
+
+    def envoyer_rappels_impayes(self):
+        """Envoie manuellement les rappels configurés pour les paiements en retard."""
+        if self._is_loading:
+            return
+        if not messagebox.askyesno(
+            "Confirmation",
+            "Envoyer les rappels aux locataires ayant un paiement en retard ?\n\n"
+            "Chaque locataire ne recevra qu'un rappel par mois et par canal.",
+            parent=self,
+        ):
+            return
+
+        self._show_loading("Envoi des rappels impayés...")
+        try:
+            result = send_overdue_payment_reminders()
+            status = result.get("status")
+            if status == "disabled":
+                messagebox.showinfo(
+                    "Rappels désactivés",
+                    "Activez overdue_reminders.enabled dans config.json et configurez le canal d'envoi.",
+                    parent=self,
+                )
+            elif status == "no_data":
+                messagebox.showinfo("Rappels impayés", result.get("message", "Aucun rappel à envoyer."), parent=self)
+            elif status in {"completed", "dry_run"}:
+                messagebox.showinfo(
+                    "Rappels impayés",
+                    f"Rappels envoyés automatiquement : {result.get('sent', 0)}\n"
+                    f"Messages WhatsApp ouverts : {result.get('opened', 0)}\n"
+                    f"Déjà traités ou ignorés : {result.get('skipped', 0)}\n"
+                    f"Erreurs : {result.get('errors', 0)}",
+                    parent=self,
+                )
+            else:
+                messagebox.showwarning(
+                    "Rappels impayés",
+                    result.get("message", "Certains rappels n'ont pas été envoyés."),
+                    parent=self,
+                )
+            self._set_status(f"📣 Rappels : {status or 'inconnu'}.")
+        except Exception as exc:
+            messagebox.showerror("Erreur", f"Impossible d'envoyer les rappels : {exc}", parent=self)
+            self._set_status("❌ Envoi des rappels interrompu.")
+        finally:
+            self._hide_loading()
 
     # ── Helpers ─────────────────────────────────────────────────────────────
     @staticmethod
@@ -1863,28 +2240,25 @@ class AppGestionLoyers(ctk.CTk):
         self.current_filter_type = filter_type
 
         if filter_type == "Nom":
-            widget = ctk.CTkEntry(
-                self.filter_value_holder, placeholder_text="Ex: Dupont",
-                fg_color=C["bg_section"], border_color=C["border"],
-                text_color=C["text_hi"], placeholder_text_color=C["text_lo"])
+            name_values = ["Tous", *self._get_nom_filter_values()]
+            default_name = self.active_filters["nom"] or "Tous"
+            if default_name not in name_values:
+                name_values.insert(1, default_name)
+            widget = self._combo(self.filter_value_holder, name_values, default_name, 260)
             widget.pack(fill="x", expand=True)
-            widget.bind("<Return>", lambda _: self._add_or_update_filter())
-            widget.bind("<KeyRelease>", self._on_filter_input_change)
+            widget.configure(command=lambda _: self._add_or_update_filter())
             self.filter_value_widget = widget
             return
 
         if filter_type == "Mois":
-            widget = ctk.CTkEntry(
-                self.filter_value_holder, placeholder_text="Ex: 2026-01 ou 01/2026",
-                fg_color=C["bg_section"], border_color=C["border"],
-                text_color=C["text_hi"], placeholder_text_color=C["text_lo"])
+            month_values = ["Tous", *build_month_choices(start_year=2025, years_ahead=5)]
+            widget = self._combo(self.filter_value_holder, month_values, "Tous", 260)
             widget.pack(fill="x", expand=True)
-            widget.bind("<Return>", lambda _: self._add_or_update_filter())
-            widget.bind("<KeyRelease>", self._on_filter_input_change)
+            widget.configure(command=lambda _: self._add_or_update_filter())
             self.filter_value_widget = widget
             return
 
-        if filter_type == "Statut":
+        if filter_type == "Statut des versements":
             widget = self._combo(self.filter_value_holder, ["Tous", "En règle", "Litigieux", "En attente"], "Tous", 220)
             widget.pack(fill="x", expand=True)
             widget.configure(command=lambda _: self._add_or_update_filter())
@@ -1906,8 +2280,8 @@ class AppGestionLoyers(ctk.CTk):
     def _on_filter_input_change(self, event=None):
         """Debounce pour la recherche en temps réel"""
         filter_type = self.combo_type_filtre.get()
-        # Uniquement pour les champs texte (Nom, Mois)
-        if filter_type in ("Nom", "Mois"):
+        # Uniquement pour les champs texte éventuels
+        if filter_type == "Nom" and isinstance(getattr(self, "filter_value_widget", None), ctk.CTkEntry):
             if self._filter_debounce_id:
                 self.after_cancel(self._filter_debounce_id)
             self._filter_debounce_id = self.after(
@@ -1921,10 +2295,10 @@ class AppGestionLoyers(ctk.CTk):
             value = self.filter_value_widget.get().strip()
 
         if filter_type == "Nom":
-            self.active_filters["nom"] = value
+            self.active_filters["nom"] = value if value and value != "Tous" else ""
         elif filter_type == "Mois":
-            self.active_filters["mois"] = value
-        elif filter_type == "Statut":
+            self.active_filters["mois"] = value if value and value != "Tous" else ""
+        elif filter_type == "Statut des versements":
             self.active_filters["statut"] = value if value and value != "Tous" else "Tous"
         elif filter_type == "Statut souscription":
             self.active_filters["statut_souscription"] = value if value and value != "Tous" else "Tous"
@@ -1942,7 +2316,7 @@ class AppGestionLoyers(ctk.CTk):
         chips = [
             ("Nom", self.active_filters["nom"]),
             ("Mois", self.active_filters["mois"]),
-            ("Statut", self.active_filters["statut"]),
+            ("Statut des versements", self.active_filters["statut"]),
             ("Statut souscription", self.active_filters["statut_souscription"]),
             ("Devise", self.active_filters["devise"]),
         ]
@@ -1958,6 +2332,10 @@ class AppGestionLoyers(ctk.CTk):
             return
 
         for label, value in visible:
+            if label == "Mois":
+                display_value = format_month_label(value)
+            else:
+                display_value = value
             chip = ctk.CTkFrame(
                 self.active_filters_frame,
                 fg_color=C["bg_section"],
@@ -1968,7 +2346,7 @@ class AppGestionLoyers(ctk.CTk):
             chip.pack(side="left", padx=(0, 8), pady=2)
             ctk.CTkLabel(
                 chip,
-                text=f"{label}: {value}",
+                text=f"{label}: {display_value}",
                 font=ctk.CTkFont(size=10, weight="bold"),
                 text_color=C["text_hi"]
             ).pack(side="left", padx=(12, 6), pady=6)
@@ -2002,9 +2380,9 @@ class AppGestionLoyers(ctk.CTk):
     def _describe_active_filters(self) -> str:
         labels = []
         if self.active_filters["nom"]:
-            labels.append(f"Nom contient '{self.active_filters['nom']}'")
+            labels.append(f"Nom = {self.active_filters['nom']}")
         if self.active_filters["mois"]:
-            labels.append(f"Mois = {self.active_filters['mois']}")
+            labels.append(f"Mois = {format_month_label(self.active_filters['mois'])}")
         if self.active_filters["statut"] != "Tous":
             labels.append(f"Statut = {self.active_filters['statut']}")
         if self.active_filters["statut_souscription"] != "Tous":
@@ -2013,6 +2391,25 @@ class AppGestionLoyers(ctk.CTk):
             labels.append(f"Devise = {self.active_filters['devise']}")
         return " | ".join(labels) if labels else "Aucun filtre actif"
 
+    def _get_nom_filter_values(self) -> list[str]:
+        """Retourne les noms complets distincts disponibles pour le filtre guidé."""
+        values = []
+        seen = set()
+
+        for record in getattr(self, "_all_data", []):
+            nom = record.last_name.strip()
+            prenom = record.first_name.strip()
+            full_name = " ".join(part for part in (nom, prenom) if part).strip()
+            if not full_name:
+                continue
+            key = full_name.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            values.append(full_name)
+
+        return sorted(values, key=str.casefold)
+
     def _set_status(self, message: str):
         self.status_var.set(message)
 
@@ -2020,6 +2417,11 @@ class AppGestionLoyers(ctk.CTk):
     def _on_close(self):
         """Fermeture propre de l'application"""
         try:
+            if self._startup_maintenance_after_id is not None:
+                try:
+                    self.after_cancel(self._startup_maintenance_after_id)
+                except Exception:
+                    pass
             if self._maintenance_after_id is not None:
                 try:
                     self.after_cancel(self._maintenance_after_id)

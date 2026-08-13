@@ -306,6 +306,6 @@ Ce projet est propriétaire. Tous droits réservés.
 
 ## 📅 Version
 
-Version actuelle : 3.6
+Version actuelle : 3.7
 
 Dernière mise à jour : Juin 2026

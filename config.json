@@ -3,6 +3,42 @@
     "host": "localhost",
     "database": "gestion_loyers",
     "user": "root",
-    "password": ""
+    "password": "",
+    "port": 3306
+  },
+  "whatsapp_reports": {
+    "enabled": true,
+    "recipients": ["+243852382067"],
+    "check_internet": true,
+    "send_monthly_pdf": true,
+    "report_types": ["en_regle", "litigieux"]
+  },
+  "overdue_reminders": {
+    "enabled": true,
+    "channel": "whatsapp",
+    "fallback": "whatsapp_web"
+  },
+  "automatic_maintenance": {
+    "update_day": 7,
+    "special_rollover_enabled": false,
+    "renew_recurring_rents": true,
+    "renewal_statuses": ["Simple", "Spécial"]
+  },
+  "monthly_report": {
+    "email": {
+      "enabled": false,
+      "host": "smtp.example.com",
+      "port": 587,
+      "starttls": true,
+      "username": "",
+      "password": "",
+      "from": "",
+      "recipients": []
+    },
+    "whatsapp": {
+      "enabled": false,
+      "mode": "disabled",
+      "recipient": ""
+    }
   }
 }

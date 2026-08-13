@@ -1,0 +1,10 @@
+{
+  "error_id": "ERR_20260703_133356",
+  "timestamp": "2026-07-03T13:33:56.295738",
+  "error_type": "AttributeError",
+  "error_message": "'_tkinter.tkapp' object has no attribute '_show_archives_page'",
+  "traceback": "Traceback (most recent call last):\n  File \"e:\\Amour Parfait\\tap\\presentation\\bootstrap.py\", line 57, in launch_app\n    app = AppGestionLoyers()\n  File \"e:\\Amour Parfait\\tap\\presentation\\views\\main_window.py\", line 628, in __init__\n    self._build_main()\n    ~~~~~~~~~~~~~~~~^^\n  File \"e:\\Amour Parfait\\tap\\presentation\\views\\main_window.py\", line 805, in _build_main\n    self._build_filters(self.page_records)\n    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^\n  File \"e:\\Amour Parfait\\tap\\presentation\\views\\main_window.py\", line 866, in _build_filters\n    corner_radius=6, command=self._show_archives_page)\n                             ^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\Ir FLM\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\tkinter\\__init__.py\", line 2557, in __getattr__\n    return getattr(self.tk, attr)\nAttributeError: '_tkinter.tkapp' object has no attribute '_show_archives_page'\n",
+  "context": {
+    "context": "launch_main_app"
+  }
+}
