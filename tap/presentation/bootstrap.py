@@ -14,6 +14,7 @@ from tap.config.responsive import apply_responsive_scaling
 from tap.core.error_reporter import report_error
 from tap.presentation.dialogs.login import LoginDialog
 from tap.presentation.views.main_window import AppGestionLoyers
+from tap.core.startup_manager import ensure_startup_ready
 
 # Configuration du logging
 logging.basicConfig(
@@ -43,6 +44,16 @@ def launch_app() -> None:
     """
     try:
         logger.info("Démarrage de l'application TAP Gestion des Loyers")
+
+        startup = ensure_startup_ready()
+        if not startup["ok"]:
+            _show_startup_error(
+                "Base de données indisponible",
+                startup["message"] + "\n\n" + "\n".join(
+                    f"• {action}" for action in startup.get("actions", [])
+                ),
+            )
+            return
         
         # Créer et afficher le dialogue de connexion
         login_dialog = LoginDialog(None)

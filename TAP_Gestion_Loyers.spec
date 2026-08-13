@@ -5,8 +5,11 @@ from pathlib import Path
 
 python_root = Path(r"C:\Users\Ir FLM\AppData\Local\Programs\Python\Python313")
 tcl_data = [
-    (str(python_root / "tcl" / "tcl8.6"), "tcl"),
-    (str(python_root / "tcl" / "tk8.6"), "tcl"),
+    # Le hook PyInstaller pyi_rth__tkinter.py recherche précisément ces
+    # deux noms dans sys._MEIPASS. Les placer dans `tcl/` provoque l'erreur
+    # « Tcl data directory ... not found » au lancement de l'EXE.
+    (str(python_root / "tcl" / "tcl8.6"), "_tcl_data"),
+    (str(python_root / "tcl" / "tk8.6"), "_tk_data"),
 ]
 tcl_binaries = [
     (str(python_root / "DLLs" / "tcl86t.dll"), "."),

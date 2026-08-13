@@ -14,6 +14,7 @@ from tap.core.backup_manager import lancer_backup_en_arriere_plan
 from tap.core.smart_error_handler import smart_error_handler
 from tap.core.data_validator import data_validator
 from tap.core.monthly_reports import generate_and_publish_monthly_report
+from tap.core.startup_manager import ensure_startup_ready
 
 
 def _parse_demo_date(argv: list[str]) -> date | None:
@@ -30,6 +31,14 @@ def _parse_demo_date(argv: list[str]) -> date | None:
 
 if __name__ == "__main__":
     try:
+        startup = ensure_startup_ready()
+        if not startup["ok"]:
+            print(startup["message"])
+            # Les opérations automatiques nécessitent la base. On laisse
+            # bootstrap afficher le message guidé puis on évite une cascade
+            # d'erreurs techniques dans la console/log.
+            launch_app()
+            sys.exit(0)
         if "--demo-cycle" in sys.argv:
             demo_date = _parse_demo_date(sys.argv)
             rapport = executer_demo_cycle_mensuel(demo_date)
