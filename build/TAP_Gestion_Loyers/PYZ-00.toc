@@ -5175,42 +5175,6 @@
    'C:\\Users\\Ir '
    'FLM\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\timeit.py',
    'PYMODULE'),
-  ('tkinter',
-   'C:\\Users\\Ir '
-   'FLM\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\tkinter\\__init__.py',
-   'PYMODULE'),
-  ('tkinter.commondialog',
-   'C:\\Users\\Ir '
-   'FLM\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\tkinter\\commondialog.py',
-   'PYMODULE'),
-  ('tkinter.constants',
-   'C:\\Users\\Ir '
-   'FLM\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\tkinter\\constants.py',
-   'PYMODULE'),
-  ('tkinter.dialog',
-   'C:\\Users\\Ir '
-   'FLM\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\tkinter\\dialog.py',
-   'PYMODULE'),
-  ('tkinter.filedialog',
-   'C:\\Users\\Ir '
-   'FLM\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\tkinter\\filedialog.py',
-   'PYMODULE'),
-  ('tkinter.font',
-   'C:\\Users\\Ir '
-   'FLM\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\tkinter\\font.py',
-   'PYMODULE'),
-  ('tkinter.messagebox',
-   'C:\\Users\\Ir '
-   'FLM\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\tkinter\\messagebox.py',
-   'PYMODULE'),
-  ('tkinter.simpledialog',
-   'C:\\Users\\Ir '
-   'FLM\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\tkinter\\simpledialog.py',
-   'PYMODULE'),
-  ('tkinter.ttk',
-   'C:\\Users\\Ir '
-   'FLM\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\tkinter\\ttk.py',
-   'PYMODULE'),
   ('token',
    'C:\\Users\\Ir '
    'FLM\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\token.py',

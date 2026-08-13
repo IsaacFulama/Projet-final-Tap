@@ -11,6 +11,10 @@ tcl_data = [
 tcl_binaries = [
     (str(python_root / "DLLs" / "tcl86t.dll"), "."),
     (str(python_root / "DLLs" / "tk86t.dll"), "."),
+    # Python 3.13 peut être détecté comme une installation Tk incomplète par
+    # le hook PyInstaller. Inclure explicitement l'extension standard évite
+    # l'erreur « No module named tkinter » au démarrage du livrable.
+    (str(python_root / "DLLs" / "_tkinter.pyd"), "."),
 ]
 
 a = Analysis(
@@ -18,7 +22,16 @@ a = Analysis(
     pathex=[],
     binaries=tcl_binaries,
     datas=tcl_data,
-    hiddenimports=[],
+    hiddenimports=[
+        "_tkinter",
+        "tkinter",
+        "tkinter.constants",
+        "tkinter.font",
+        "tkinter.filedialog",
+        "tkinter.messagebox",
+        "tkinter.simpledialog",
+        "tkinter.ttk",
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
