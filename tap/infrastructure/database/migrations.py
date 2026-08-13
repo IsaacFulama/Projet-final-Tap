@@ -1,4 +1,6 @@
 from datetime import date
+import hashlib
+import json
 
 from mysql.connector import Error
 
@@ -69,6 +71,16 @@ def initialiser_schema_si_absent():
                 updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                 completed_at DATETIME NULL,
                 UNIQUE KEY uq_operation_period (operation_key, period_key)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """
+        )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+                version VARCHAR(32) PRIMARY KEY,
+                name VARCHAR(150) NOT NULL,
+                checksum CHAR(64) NOT NULL,
+                applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             """
         )
@@ -474,6 +486,126 @@ def ajouter_table_signatures_paiements():
             conn.close()
 
 
+def verifier_coherence_donnees() -> dict[str, int]:
+    """Effectue un contrôle non destructif avant/après une migration.
+
+    Aucun enregistrement n'est corrigé ou supprimé automatiquement. Les
+    anomalies sont comptées afin d'être sauvegardées dans le journal de
+    migration et traitées avec une sauvegarde disponible.
+    """
+    result = {
+        "paiements_orphelins": 0,
+        "montants_invalides": 0,
+        "restes_incoherents": 0,
+        "signatures_orphelines": 0,
+    }
+    conn = None
+    cursor = None
+    try:
+        conn = obtenir_connexion()
+        if conn is None or not conn.is_connected():
+            return result
+        cursor = conn.cursor()
+        checks = {
+            "paiements_orphelins": (
+                "SELECT COUNT(*) FROM paiements p "
+                "LEFT JOIN locataires l ON l.id = p.locataire_id "
+                "WHERE l.id IS NULL"
+            ),
+            "montants_invalides": (
+                "SELECT COUNT(*) FROM paiements "
+                "WHERE montant_total < 0 OR montant_paye < 0"
+            ),
+            "restes_incoherents": (
+                "SELECT COUNT(*) FROM paiements "
+                "WHERE ABS(COALESCE(reste_a_payer, 0) - "
+                "GREATEST(0, COALESCE(montant_total, 0) - COALESCE(montant_paye, 0))) > 0.01"
+            ),
+            "signatures_orphelines": (
+                "SELECT COUNT(*) FROM signatures_paiements s "
+                "LEFT JOIN paiements p ON p.id = s.paiement_id "
+                "WHERE p.id IS NULL"
+            ),
+        }
+        for key, query in checks.items():
+            try:
+                cursor.execute(query)
+                row = cursor.fetchone()
+                result[key] = int(row[0] if row else 0)
+            except Error:
+                # La table de signatures peut être absente sur une ancienne
+                # base ; la migration suivante la crée.
+                result[key] = 0
+        return result
+    except Error as exc:
+        print(f"Contrôle de cohérence indisponible : {exc}")
+        return result
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if conn is not None and conn.is_connected():
+            conn.close()
+
+
+def normaliser_restes_non_negatifs() -> None:
+    """Rétablit l'invariant métier : un reste à payer ne peut pas être négatif.
+
+    Le montant payé n'est jamais modifié : un éventuel trop-perçu reste donc
+    traçable et seul le champ dérivé ``reste_a_payer`` est recalculé.
+    """
+    conn = None
+    cursor = None
+    try:
+        conn = obtenir_connexion()
+        if conn is None or not conn.is_connected():
+            return
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE paiements SET reste_a_payer = GREATEST(0, "
+            "COALESCE(montant_total, 0) - COALESCE(montant_paye, 0)) "
+            "WHERE reste_a_payer < 0"
+        )
+        if cursor.rowcount:
+            print(f"{cursor.rowcount} reste(s) à payer négatif(s) normalisé(s)")
+        conn.commit()
+    except Error as exc:
+        if conn is not None and conn.is_connected():
+            conn.rollback()
+        print(f"Normalisation des restes impossible : {exc}")
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if conn is not None and conn.is_connected():
+            conn.close()
+
+
+def enregistrer_version_schema(version: str, name: str, payload: dict) -> None:
+    """Journalise une version de schéma de manière idempotente."""
+    conn = None
+    cursor = None
+    try:
+        conn = obtenir_connexion()
+        if conn is None or not conn.is_connected():
+            return
+        cursor = conn.cursor()
+        checksum = hashlib.sha256(
+            json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
+        ).hexdigest()
+        cursor.execute(
+            "INSERT INTO schema_migrations (version, name, checksum) "
+            "VALUES (%s, %s, %s) ON DUPLICATE KEY UPDATE checksum = VALUES(checksum)",
+            (version, name, checksum),
+        )
+        conn.commit()
+    except Error as exc:
+        print(f"Journal de migration indisponible : {exc}")
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if conn is not None and conn.is_connected():
+            conn.close()
+
+
 def ajouter_index_unique_locataire_nom_prenom():
     """Empêche les doublons de locataires au niveau MySQL."""
     try:
@@ -509,9 +641,17 @@ def run_migrations():
     renommer_statut_paye_en_en_regle()
     migrer_mois_vers_date()
     ajouter_colonnes_acompte()
+    normaliser_restes_non_negatifs()
     ajouter_index_locataire_mois_statut()
     ajouter_index_unique_locataire_nom_prenom()
     ajouter_table_maintenance_journal()
     ajouter_table_archives_paiements()
     ajouter_table_loyer_tarifs()
     ajouter_table_signatures_paiements()
+    coherence = verifier_coherence_donnees()
+    enregistrer_version_schema(
+        "4.1.0",
+        "responsive_qr_coherence",
+        {"migrations": "4.1.0", "coherence": coherence},
+    )
+    return coherence

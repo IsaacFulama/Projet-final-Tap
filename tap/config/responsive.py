@@ -34,6 +34,39 @@ class LayoutProfile:
     table_widths: dict[str, int]
 
 
+TABLE_COLUMNS = (
+    "Nom",
+    "Prénom",
+    "Mois",
+    "Montant",
+    "Devise",
+    "Statut Souscription",
+    "Statut des versements",
+    "Signé",
+)
+
+
+def table_display_columns(profile_name: str) -> tuple[str, ...]:
+    """Colonnes réellement affichées selon la largeur disponible.
+
+    Sur un écran étroit, les colonnes secondaires restent dans les données et
+    dans l'historique, mais ne compressent plus la liste au point de rendre
+    les enregistrements illisibles. La barre horizontale reste disponible si
+    l'utilisateur veut parcourir toutes les colonnes.
+    """
+    if profile_name == "compact":
+        return (
+            "Nom",
+            "Prénom",
+            "Mois",
+            "Montant",
+            "Devise",
+            "Statut des versements",
+            "Signé",
+        )
+    return TABLE_COLUMNS
+
+
 def detect_screen_profile() -> ScreenProfile:
     """Détecte la taille d'écran et le facteur DPI courant."""
     import tkinter as tk
@@ -111,13 +144,14 @@ def build_layout_profile(window_width: int) -> LayoutProfile:
     """Retourne un profil de layout adapté à la largeur de la fenêtre."""
     if window_width < 1000:
         widths = {
-            "Nom": 165,
-            "Prénom": 150,
-            "Mois": 120,
-            "Montant": 120,
-            "Devise": 85,
+            "Nom": 135,
+            "Prénom": 120,
+            "Mois": 100,
+            "Montant": 105,
+            "Devise": 70,
             "Statut Souscription": 150,
-            "Statut des versements": 120,
+            "Statut des versements": 125,
+            "Signé": 75,
         }
         return LayoutProfile(
             name="compact",

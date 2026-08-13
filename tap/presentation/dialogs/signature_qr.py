@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
+import webbrowser
 
 import customtkinter as ctk
 import qrcode
@@ -94,7 +95,7 @@ class SignatureQRDialog(ctk.CTkToplevel):
         self.minsize(min(360, width), min(480, height))
 
     def _build_ui(self):
-        frame = ctk.CTkFrame(
+        frame = ctk.CTkScrollableFrame(
             self,
             fg_color=C["bg_card"],
             corner_radius=12,
@@ -164,6 +165,17 @@ class SignatureQRDialog(ctk.CTkToplevel):
             command=self._copy_url,
         ).pack(fill="x", padx=18, pady=(0, 12))
 
+        ctk.CTkButton(
+            frame,
+            text="Ouvrir le lien sur ce PC",
+            height=34,
+            fg_color=C["bg_section"],
+            hover_color=C["border"],
+            text_color=C["text_hi"],
+            corner_radius=6,
+            command=self._open_url,
+        ).pack(fill="x", padx=18, pady=(0, 12))
+
         self.status_label = ctk.CTkLabel(
             frame,
             text="En attente de signature...",
@@ -193,11 +205,20 @@ class SignatureQRDialog(ctk.CTkToplevel):
         lien manuellement.
         """
         try:
-            qr_img = qrcode.make(self.session.url).convert("RGB")
+            qr = qrcode.QRCode(
+                version=None,
+                error_correction=qrcode.constants.ERROR_CORRECT_H,
+                box_size=8,
+                border=4,
+            )
+            qr.add_data(self.session.url)
+            qr.make(fit=True)
+            qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
+            qr_size = 220 if self.winfo_screenheight() < 900 else 260
             self.qr_image = ctk.CTkImage(
                 light_image=qr_img,
                 dark_image=qr_img,
-                size=(260, 260),
+                size=(qr_size, qr_size),
             )
             ctk.CTkLabel(frame, image=self.qr_image, text="").pack(pady=(4, 12))
         except Exception:
@@ -231,6 +252,22 @@ class SignatureQRDialog(ctk.CTkToplevel):
             text="✅ Lien copié. Vous pouvez aussi scanner le QR.",
             text_color=_STATUS_COLOR_SIGNED,
         )
+
+    def _open_url(self):
+        try:
+            if not webbrowser.open(self.session.url):
+                raise RuntimeError("le navigateur n'a pas accepté le lien")
+            self._status_override_until = time.monotonic() + _COPY_CONFIRMATION_SECONDS
+            self.status_label.configure(
+                text="✅ Lien ouvert dans le navigateur.",
+                text_color=_STATUS_COLOR_SIGNED,
+            )
+        except Exception:
+            logger.exception("Échec de l'ouverture du lien de signature")
+            self.status_label.configure(
+                text="⚠️ Ouverture impossible. Copiez le lien ou scannez le QR.",
+                text_color=_STATUS_COLOR_WARN,
+            )
 
     def _poll_status(self):
         """

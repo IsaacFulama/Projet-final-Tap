@@ -41,6 +41,14 @@ def test_signature_payload_hash_is_stable():
     assert local_signature.compute_document_hash(payload) == local_signature.compute_document_hash(payload.copy())
 
 
+def test_signature_host_can_be_overridden(monkeypatch):
+    monkeypatch.setenv("TAP_SIGNATURE_HOST", "192.168.1.50")
+    server = local_signature.LocalSignatureServer()
+    session = server.create_session(_payment_meta())
+
+    assert session.url.startswith("http://192.168.1.50:")
+
+
 def test_decode_signature_image_accepts_png_data_url():
     raw = local_signature.decode_signature_image(_png_data_url())
 
@@ -56,6 +64,13 @@ def test_submit_signature_marks_session_signed(monkeypatch):
         saved.append((session_arg.token, signature_png, signer_ip, user_agent))
 
     monkeypatch.setattr(local_signature, "save_signature", fake_save_signature)
+    monkeypatch.setattr(
+        local_signature,
+        "enregistrer_signature_et_mettre_a_jour_paiement",
+        lambda session_payload, document_hash, signature_png, signer_ip, user_agent: (
+            saved.append((session_payload["paiement_id"], signature_png, signer_ip, user_agent)) or (True, "ok")
+        ),
+    )
 
     response = server._app.test_client().post(
         f"/api/sign/{session.token}",
@@ -66,7 +81,7 @@ def test_submit_signature_marks_session_signed(monkeypatch):
     assert response.get_json()["status"] == "signed"
     assert response.get_json()["receipt_url"] == f"/receipt/{session.token}"
     assert server.status(session.token)["status"] == "signed"
-    assert saved and saved[0][0] == session.token
+    assert saved and saved[0][0] == session.payload["paiement_id"]
 
 
 def test_signed_receipt_page_contains_print_action(monkeypatch):
@@ -74,6 +89,11 @@ def test_signed_receipt_page_contains_print_action(monkeypatch):
     session = server.create_session(_payment_meta())
 
     monkeypatch.setattr(local_signature, "save_signature", lambda *args: None)
+    monkeypatch.setattr(
+        local_signature,
+        "enregistrer_signature_et_mettre_a_jour_paiement",
+        lambda *args, **kwargs: (True, "ok"),
+    )
     server._app.test_client().post(
         f"/api/sign/{session.token}",
         json={"consent": True, "signature": _png_data_url()},

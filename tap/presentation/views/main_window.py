@@ -11,6 +11,7 @@ from tap.config.responsive import (
     build_layout_profile,
     clamp_window_geometry,
     detect_screen_profile,
+    table_display_columns,
 )
 from tap.core.utils import (
     build_month_choices,
@@ -1383,9 +1384,31 @@ class AppGestionLoyers(ctk.CTk):
             except Exception:
                 pass
 
-    def _layout_table_cards(self, columns: int):
-        pass
+        # Garder les enregistrements lisibles sur les écrans étroits. Les
+        # colonnes secondaires restent disponibles dans l'historique et via
+        # la barre horizontale, mais ne réduisent plus la liste à quelques
+        # pixels de largeur.
+        try:
+            self.tableau.configure(displaycolumns=table_display_columns(profile.name))
+        except Exception:
+            pass
 
+        if hasattr(self, "left_pane") and hasattr(self, "right_pane"):
+            try:
+                if profile.name == "compact":
+                    self.left_pane.pack_forget()
+                    self.right_pane.pack(side="top", fill="both", expand=True)
+                    self.lbl_table_hint.configure(
+                        text="Écran compact : colonnes essentielles affichées. Double-clic pour voir tout le détail."
+                    )
+                else:
+                    self.right_pane.pack_forget()
+                    self.left_pane.pack(side="left", fill="y", padx=(0, 10))
+                    self.right_pane.pack(side="right", fill="both", expand=True)
+            except Exception:
+                pass
+
+    def _layout_table_cards(self, columns: int):
         self._current_table_card_columns = columns
 
     def _layout_kpi_cards(self, columns: int):

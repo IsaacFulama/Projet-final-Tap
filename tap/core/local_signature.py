@@ -4,6 +4,7 @@ import base64
 import hashlib
 import html
 import json
+import os
 import secrets
 import socket
 import threading
@@ -16,7 +17,9 @@ from flask import Flask, jsonify, request
 from werkzeug.serving import make_server
 
 from tap.infrastructure.database.connection import obtenir_connexion
-from tap.infrastructure.database.repository import update_payment_details_after_signature
+from tap.infrastructure.database.repository import (
+    enregistrer_signature_et_mettre_a_jour_paiement,
+)
 
 
 SIGNATURE_EXPIRATION_MINUTES = 10
@@ -76,7 +79,9 @@ class LocalSignatureServer:
         expires_at = datetime.now(timezone.utc) + timedelta(
             minutes=SIGNATURE_EXPIRATION_MINUTES
         )
-        url = f"http://{get_lan_ip()}:{self.port}/sign/{token}"
+        host = os.getenv("TAP_SIGNATURE_HOST", "").strip() or get_lan_ip()
+        host = host.removeprefix("http://").removeprefix("https://").rstrip("/")
+        url = f"http://{host}:{self.port}/sign/{token}"
 
         session = SignatureSession(
             token=token,
@@ -153,12 +158,15 @@ class LocalSignatureServer:
             try:
                 signature_data_url = data.get("signature", "")
                 signature_bytes = decode_signature_image(signature_data_url)
-                save_signature(
-                    session,
+                success, db_message = enregistrer_signature_et_mettre_a_jour_paiement(
+                    session.payload,
+                    session.document_hash,
                     signature_bytes,
                     request.remote_addr or "",
                     request.headers.get("User-Agent", ""),
                 )
+                if not success:
+                    raise RuntimeError(db_message)
             except Exception as exc:
                 session.status = "error"
                 session.error = str(exc)
@@ -167,23 +175,6 @@ class LocalSignatureServer:
             session.status = "signed"
             session.signed_at = datetime.now(timezone.utc)
             session.signature_data_url = signature_data_url
-
-            # Mettre à jour la base de données après une signature réussie
-            paiement_id = int(session.payload["paiement_id"])
-            montant_paye_signature = Decimal(session.payload["montant_paye_signature"])
-            montant_total = Decimal(session.payload["montant_total"])
-            devise = session.payload["devise"]
-
-            success, db_message = update_payment_details_after_signature(
-                paiement_id, montant_paye_signature, montant_total, devise
-            )
-
-            if not success:
-                # Log l'erreur mais ne bloque pas la signature
-                print(f"Erreur de mise à jour BD après signature: {db_message}")
-                # Optionnel: Revertir le statut de la session ou marquer une erreur spécifique
-                # session.status = "error_db_update"
-                # session.error = db_message
 
             return jsonify({
                 "status": "signed",

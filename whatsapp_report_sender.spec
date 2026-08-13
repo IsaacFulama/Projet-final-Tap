@@ -1,16 +1,12 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-from PyInstaller.utils.hooks import collect_submodules, collect_data_files
+from PyInstaller.utils.hooks import collect_submodules
 
 block_cipher = None
 
 # Collecte automatique et robuste de tous les sous-modules de votre package local 'tap'
 # Cela évite d'avoir à l'écrire manuellement à chaque ajout de fichier dans tap/
-hiddenimports = (
-    collect_submodules("tap") + 
-    collect_submodules("mysql") + 
-    ["mysql.connector"]
-)
+hiddenimports = collect_submodules("tap") + ["mysql.connector"]
 
 # Gestion des fichiers de données requis par les bibliothèques tierces (si nécessaire)
 datas = []
@@ -32,7 +28,10 @@ a = Analysis(
     excludes=[
         "tkinter",       # Exclure CustomTkinter/Tkinter si ce script CLI n'utilise pas l'IHM
         "unittest",      # Évite d'embarquer les modules de tests unitaires
-        "email",         # À retirer si vous n'envoyez pas de mails (uniquement WhatsApp)
+        "django",
+        "mysql.ai",
+        "mysql.connector.aio",
+        "mysql.connector.django",
     ],
     noarchive=False,
     optimize=1,          # Passage à 1 pour retirer les assertions et optimiser légèrement le bytecode

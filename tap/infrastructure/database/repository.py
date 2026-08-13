@@ -1,6 +1,5 @@
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
-from tkinter import messagebox
 
 from mysql.connector import Error
 
@@ -8,6 +7,15 @@ from tap.core.date_utils import parse_mois_saisie
 from tap.infrastructure.database.connection import ConnectionProvider, obtenir_connexion
 
 MOIS_SQL_EXPR = "DATE_FORMAT(p.mois, '%m/%Y')"
+
+
+def _show_error(message: str) -> None:
+    """Affiche une erreur dans l'UI si Tk est disponible, sinon la journalise."""
+    try:
+        from tkinter import messagebox
+        messagebox.showerror("Erreur", message)
+    except Exception:
+        print(message)
 
 
 def _normaliser_identite(value) -> str:
@@ -626,7 +634,7 @@ def get_souscriptions_avec_filtres(
         return cursor.fetchall()
 
     except Error as e:
-        messagebox.showerror("Erreur", f"Impossible de charger les données : {e}")
+        _show_error(f"Impossible de charger les données : {e}")
         return []
     finally:
         if cursor is not None:
@@ -950,7 +958,7 @@ def get_archives(
         return cursor.fetchall()
 
     except Error as e:
-        messagebox.showerror("Erreur", f"Impossible de charger les archives : {e}")
+        _show_error(f"Impossible de charger les archives : {e}")
         return []
     finally:
         if "conn" in locals() and conn.is_connected():
@@ -1015,8 +1023,12 @@ def update_payment_details_after_signature(
 
         current_paid_amount = _decimal_amount(current_paid_amount_row[0])
         
-        # Le montant payé total est le montant déjà payé plus le montant de la signature
-        new_total_paid_amount = current_paid_amount + montant_paye_signature
+        # Une signature confirme le total affiché sur le reçu. Elle ne doit
+        # jamais recréditer le paiement si le même QR est soumis deux fois ou
+        # si le paiement a déjà été enregistré avant l'ouverture du QR.
+        # ``max`` rend l'opération idempotente et protège contre un ancien
+        # lien contenant un montant inférieur à celui déjà enregistré.
+        new_total_paid_amount = max(current_paid_amount, montant_paye_signature)
 
         # Calculer les nouveaux statuts et reste à payer
         statut, statut_paiement, reste_a_payer = _statuts_montant(
@@ -1050,4 +1062,80 @@ def update_payment_details_after_signature(
     finally:
         if "conn" in locals() and conn.is_connected():
             cursor.close()
+            conn.close()
+
+
+def enregistrer_signature_et_mettre_a_jour_paiement(
+    payload: dict,
+    document_hash: str,
+    signature_png: bytes,
+    signer_ip: str,
+    user_agent: str,
+) -> tuple[bool, str]:
+    """Enregistre une signature et son paiement dans une transaction unique."""
+    conn = None
+    cursor = None
+    try:
+        conn = obtenir_connexion()
+        cursor = conn.cursor()
+        paiement_id = int(payload["paiement_id"])
+        montant_total = _decimal_amount(payload.get("montant_total", 0))
+        montant_signe = _decimal_amount(payload.get("montant_paye_signature", 0))
+
+        cursor.execute(
+            "SELECT montant_paye FROM paiements WHERE id = %s FOR UPDATE",
+            (paiement_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return False, "Paiement introuvable."
+
+        cursor.execute(
+            "SELECT id FROM signatures_paiements WHERE paiement_id = %s LIMIT 1",
+            (paiement_id,),
+        )
+        if cursor.fetchone():
+            return True, "Signature déjà enregistrée."
+
+        current_paid = _decimal_amount(row[0])
+        new_paid = max(current_paid, montant_signe)
+        statut, statut_paiement, reste = _statuts_montant(montant_total, new_paid)
+
+        cursor.execute(
+            """
+            INSERT INTO signatures_paiements (
+                paiement_id, locataire_id, document_hash, consentement,
+                signature_png, signataire_nom, signer_ip, user_agent
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                paiement_id,
+                int(payload["locataire_id"]),
+                document_hash,
+                1,
+                signature_png,
+                str(payload.get("signataire_nom", ""))[:201],
+                signer_ip[:45],
+                user_agent[:255],
+            ),
+        )
+        cursor.execute(
+            """
+            UPDATE paiements
+            SET montant_paye = %s, reste_a_payer = %s,
+                statut = %s, statut_paiement = %s
+            WHERE id = %s
+            """,
+            (float(new_paid), float(reste), statut, statut_paiement, paiement_id),
+        )
+        conn.commit()
+        return True, "Signature et paiement enregistrés."
+    except (Error, ValueError) as exc:
+        if conn is not None and conn.is_connected():
+            conn.rollback()
+        return False, f"Erreur transactionnelle de signature : {exc}"
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if conn is not None and conn.is_connected():
             conn.close()
