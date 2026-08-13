@@ -14,7 +14,21 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['customtkinter', 'matplotlib'],
+    # Le serveur mobile est une application console/web : il ne doit pas
+    # embarquer Tkinter ni son runtime Tcl/Tk. Sinon PyInstaller ajoute
+    # pyi_rth__tkinter.py et l'EXE échoue si le dossier Tcl n'existe pas.
+    excludes=[
+        'customtkinter',
+        'matplotlib',
+        'tkinter',
+        '_tkinter',
+        'tkinter.ttk',
+        'tkinter.messagebox',
+        'tkinter.filedialog',
+        'tkinter.simpledialog',
+        'tkinter.font',
+        'tkinter.constants',
+    ],
     noarchive=False,
     optimize=0,
 )
