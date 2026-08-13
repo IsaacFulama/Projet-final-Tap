@@ -48,6 +48,28 @@ def test_send_whatsapp_report_dry_run():
     assert result["period"] == "2026-09"
 
 
+def test_send_monthly_pdf_reports_does_not_claim_success_without_provider(monkeypatch):
+    monkeypatch.setattr(
+        "tap.core.whatsapp_reports.load_config_from_json",
+        lambda config_path=Path("config.json"): {
+            "whatsapp_reports": {
+                "enabled": True,
+                "send_monthly_pdf": True,
+                "recipients": ["+243852382067"],
+                "check_internet": False,
+            }
+        },
+    )
+    monkeypatch.setattr(
+        "tap.core.whatsapp_reports.load_whatsapp_config",
+        lambda: WhatsAppConfig(enabled=False, mode="disabled"),
+    )
+
+    result = send_monthly_pdf_reports(month="2026-09")
+
+    assert result["status"] == "not_configured"
+
+
 def test_get_monthly_data_by_status_uses_paiements(monkeypatch):
     executed = []
 
@@ -152,4 +174,3 @@ def test_send_monthly_pdf_reports_dry_run_with_selected_type(monkeypatch):
     assert len(result["results"]) == 1
     assert result["results"][0]["report_type"] == "en_regle"
     assert all(item["status"] == "dry_run" for item in result["results"])
-

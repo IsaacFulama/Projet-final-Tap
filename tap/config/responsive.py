@@ -38,17 +38,24 @@ def detect_screen_profile() -> ScreenProfile:
     """Détecte la taille d'écran et le facteur DPI courant."""
     import tkinter as tk
 
-    root = tk.Tk()
-    root.withdraw()
     try:
-        width = root.winfo_screenwidth()
-        height = root.winfo_screenheight()
+        root = tk.Tk()
+        root.withdraw()
         try:
-            dpi_scale = float(root.winfo_fpixels("1i")) / 96.0
-        except Exception:
-            dpi_scale = 1.0
-    finally:
-        root.destroy()
+            width = root.winfo_screenwidth()
+            height = root.winfo_screenheight()
+            try:
+                dpi_scale = float(root.winfo_fpixels("1i")) / 96.0
+            except (tk.TclError, TypeError, ValueError):
+                dpi_scale = 1.0
+        finally:
+            root.destroy()
+    except tk.TclError:
+        # Les commandes CLI, les tests et certains environnements Python
+        # n'embarquent pas toujours les bibliothèques Tcl/Tk ou n'ont pas de
+        # session graphique. Un profil standard permet au cœur métier de
+        # rester importable et laisse l'UI afficher son erreur au lancement.
+        return ScreenProfile(width=1366, height=768, dpi_scale=1.0)
 
     return ScreenProfile(width=width, height=height, dpi_scale=dpi_scale)
 

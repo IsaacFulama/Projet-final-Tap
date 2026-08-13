@@ -83,19 +83,24 @@ def initialiser_schema_si_absent():
 
 
 def ajouter_colonne_date_creation():
-    """Ajoute la colonne date_creation si elle n'existe pas."""
+    """Ajoute date_creation aux tables qui l'utilisent."""
     try:
         conn = obtenir_connexion()
         if conn.is_connected():
             cursor = conn.cursor()
 
-            cursor.execute("SHOW COLUMNS FROM paiements LIKE 'date_creation'")
-            if not cursor.fetchone():
-                cursor.execute(
-                    "ALTER TABLE paiements ADD COLUMN date_creation TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
-                )
+            changed = False
+            for table in ("locataires", "paiements"):
+                cursor.execute(f"SHOW COLUMNS FROM {table} LIKE 'date_creation'")
+                if not cursor.fetchone():
+                    cursor.execute(
+                        f"ALTER TABLE {table} "
+                        "ADD COLUMN date_creation TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                    )
+                    changed = True
+            if changed:
                 conn.commit()
-                print("Colonne date_creation ajoutée avec succès")
+                print("Colonnes date_creation vérifiées et ajoutées si nécessaire")
 
             cursor.close()
             conn.close()

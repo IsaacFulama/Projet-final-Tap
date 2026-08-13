@@ -39,13 +39,21 @@ class WhatsAppConfig:
 
 
 def check_internet_connection(host: str = "8.8.8.8", port: int = 53, timeout: float = 3.0) -> bool:
-    """Vérifie si l'utilisateur est connecté à internet."""
-    try:
-        socket.setdefaulttimeout(timeout)
-        socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect((host, port))
-        return True
-    except (socket.timeout, OSError):
-        return False
+    """Vérifie Internet avec HTTP, sans dépendre du DNS sortant sur le port 53."""
+    del host, port
+    probes = (
+        "https://www.google.com/generate_204",
+        "https://graph.facebook.com",
+        "https://api.twilio.com",
+    )
+    for url in probes:
+        try:
+            request = Request(url, method="HEAD")
+            with urlopen(request, timeout=timeout):
+                return True
+        except (HTTPError, URLError, TimeoutError, OSError):
+            continue
+    return False
 
 
 def _env(name: str, default: str = "") -> str:
@@ -692,14 +700,6 @@ def send_monthly_pdf_reports(
             "message": "Aucun type de rapport valide n'a été demandé. Utilisez en_regle et/ou litigieux.",
         }
 
-    # Vérifier la connexion internet si configuré
-    if whatsapp_settings.get("check_internet", True):
-        if not check_internet_connection():
-            return {
-                "status": "no_internet",
-                "message": "Pas de connexion internet. Les rapports n'ont pas été envoyés.",
-            }
-    
     # Utiliser les destinataires du config.json si non spécifiés
     if recipients is None:
         recipients = whatsapp_settings.get("recipients", [])
@@ -712,6 +712,29 @@ def send_monthly_pdf_reports(
             "status": "error",
             "message": "Aucun destinataire configuré dans config.json (whatsapp_reports.recipients) ou via TAP_WHATSAPP_TO.",
         }
+
+    # Un destinataire dans config.json ne suffit pas à envoyer un fichier :
+    # il faut également un fournisseur configuré dans l'environnement
+    # (Cloud API, Twilio ou webhook). Éviter de retourner "completed" alors
+    # que send_whatsapp_report ne peut que répondre "disabled".
+    if not dry_run and not _whatsapp_provider_ready(whatsapp_config):
+        return {
+            "status": "not_configured",
+            "message": (
+                "WhatsApp est activé dans config.json, mais aucun fournisseur "
+                "API n'est configuré dans les variables TAP_WHATSAPP_."
+            ),
+        }
+
+    # Vérifier la connexion uniquement lorsque l'envoi réel est possible.
+    # Cela permet de retourner une erreur de configuration explicite au lieu
+    # de masquer l'absence de fournisseur derrière un échec réseau.
+    if not dry_run and whatsapp_settings.get("check_internet", True):
+        if not check_internet_connection():
+            return {
+                "status": "no_internet",
+                "message": "Pas de connexion internet. Les rapports n'ont pas été envoyés.",
+            }
     
     current_month = report_month or datetime.now().strftime("%Y-%m")
     pdf_reports = generate_monthly_pdf_reports(month=current_month, report_types=requested_types)
@@ -766,7 +789,7 @@ def send_monthly_pdf_reports(
                 "pdf_path": str(pdf_path),
                 **result,
             })
-            if result.get("status") not in {"sent", "dry_run", "disabled"}:
+            if result.get("status") not in {"sent", "dry_run"}:
                 all_sent = False
 
     if all_sent and not dry_run:
