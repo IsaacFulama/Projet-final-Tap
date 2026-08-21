@@ -1,0 +1,57 @@
+name: TAP Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m pip install -r requirements.txt pyinstaller
+      - name: Build Windows executable
+        run: pyinstaller TAP_Gestion_Loyers.spec --clean --noconfirm
+      - name: Assemble release assets
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release-assets | Out-Null
+          Copy-Item dist/TAP_Gestion_Loyers.exe release-assets/
+          Copy-Item config.json release-assets/config.json.example
+          Copy-Item README_CLIENT.md release-assets/
+          Copy-Item INSTALLATION.md release-assets/
+          Copy-Item LIVRAISON.md release-assets/
+          Compress-Archive -Path release-assets/* -DestinationPath TAP_Gestion_Loyers_${{ github.ref_name }}.zip -Force
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          body: |
+            ## TAP Gestion des Loyers ${{ github.ref_name }}
+
+            Application Windows de gestion des locataires, loyers et paiements.
+
+            ### Inclus
+            - Page dédiée des enregistrements avec filtres combinables et affichage responsive.
+            - Historique, statuts automatiques, acomptes et exports PDF.
+            - Rappels WhatsApp intelligents avec résumé et réponses guidées.
+            - Sauvegarde SQL ZIP bimensuelle avec checksum et rotation.
+
+            ### Installation
+            1. Démarrer MySQL/MariaDB dans XAMPP.
+            2. Télécharger `TAP_Gestion_Loyers.exe` et `config.json.example`.
+            3. Copier `config.json.example` vers `config.json` et renseigner la base.
+            4. Lancer l’exécutable Windows.
+          files: |
+            TAP_Gestion_Loyers_${{ github.ref_name }}.zip
+            release-assets/TAP_Gestion_Loyers.exe
+            release-assets/config.json.example
+            release-assets/README_CLIENT.md
+            release-assets/INSTALLATION.md
+            release-assets/LIVRAISON.md
