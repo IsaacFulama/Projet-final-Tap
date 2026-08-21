@@ -79,7 +79,7 @@ class AuthenticationManager:
                 "created_at": datetime.fromisoformat(value["created_at"]),
                 "last_login": datetime.fromisoformat(value["last_login"]) if value.get("last_login") else None,
                 "is_active": bool(value.get("is_active", True)),
-                "role": value.get("role", "agent"),
+                "role": value.get("role", "admin" if name == "TAPADM" else "agent"),
             } for name, value in users.items()}
             return True
         except (OSError, ValueError, KeyError, TypeError):
@@ -95,7 +95,7 @@ class AuthenticationManager:
                 "created_at": value["created_at"].isoformat(),
                 "last_login": value["last_login"].isoformat() if value["last_login"] else None,
                 "is_active": value["is_active"],
-                "role": value.get("role", "agent"),
+                "role": value.get("role", "admin" if name == "TAPADM" else "agent"),
             } for name, value in self._users.items()}}
             temporary = self._storage_path.with_suffix(".tmp")
             temporary.write_text(json.dumps(payload), encoding="utf-8")
@@ -316,7 +316,7 @@ class AuthenticationManager:
             "created_at": user["created_at"],
             "last_login": user["last_login"],
             "is_active": user["is_active"],
-            "role": user.get("role", "agent"),
+            "role": user.get("role", "admin" if username == "TAPADM" else "agent"),
         }
 
 
