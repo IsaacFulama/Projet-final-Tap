@@ -13,3 +13,4 @@ def test_admin_insights_identifies_collection_and_priorities():
     assert result["overdue"] == 1
     assert result["unsigned"] == 1
     assert result["recommendations"]
+    assert result["health"] == "surveillance"

@@ -65,6 +65,23 @@ class AdminCenterDialog(ctk.CTkToplevel):
         progress.pack(fill="x", padx=14, pady=8)
         progress.set(max(0.0, min(1.0, insights["collection_rate"] / 100)))
         ctk.CTkLabel(intelligence, text="\n".join(f"• {item}" for item in insights["recommendations"]), text_color=C["text_lo"], justify="left", anchor="w").pack(fill="x", padx=14, pady=(0, 12))
+        self._build_alert_radar(body, insights)
+
+    def _build_alert_radar(self, parent, insights: dict) -> None:
+        colors = {"critique": C["red"], "surveillance": C["orange"], "sain": C["green"], "inconnu": C["text_lo"]}
+        radar = ctk.CTkFrame(parent, fg_color=colors.get(insights["health"], C["border"]), corner_radius=10)
+        radar.pack(fill="x", padx=18, pady=(0, 18))
+        title = ctk.CTkLabel(radar, text=f"◉ RADAR · PORTEFEUILLE {insights['health'].upper()}", font=ctk.CTkFont(size=11, weight="bold"), text_color="#FFFFFF")
+        title.pack(anchor="w", padx=14, pady=(10, 2))
+        ctk.CTkLabel(radar, text=insights["alert"], text_color="#FFFFFF", anchor="w", justify="left").pack(fill="x", padx=14, pady=(0, 10))
+        if insights["health"] in {"critique", "surveillance"}:
+            self._pulse_alert(title, colors[insights["health"]])
+
+    def _pulse_alert(self, label, color: str, visible: bool = True) -> None:
+        if not label.winfo_exists():
+            return
+        label.configure(text_color="#FFFFFF" if visible else "#FDE68A")
+        label.after(650, lambda: self._pulse_alert(label, color, not visible))
 
     def _animate_value(self, label, value: str, suffix: str = ""):
         try:

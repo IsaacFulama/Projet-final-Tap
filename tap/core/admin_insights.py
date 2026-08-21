@@ -29,4 +29,12 @@ def build_admin_insights(records: list) -> dict:
         recommendations.append(f"{unsigned} reçu(s) ne sont pas encore signés.")
     if not recommendations:
         recommendations.append("Aucune urgence détectée : votre portefeuille est à jour.")
-    return {"total": total, "paid": paid, "remaining": remaining, "overdue": overdue, "unsigned": unsigned, "collection_rate": rate, "recommendations": recommendations}
+    if not records:
+        health, alert = "inconnu", "Aucune donnée exploitable pour le moment."
+    elif overdue >= 3 or rate < 60:
+        health, alert = "critique", "Action recommandée aujourd’hui : traiter les impayés prioritaires."
+    elif overdue or rate < 90 or unsigned:
+        health, alert = "surveillance", "Votre portefeuille nécessite une vérification ciblée."
+    else:
+        health, alert = "sain", "Les opérations sont sous contrôle."
+    return {"total": total, "paid": paid, "remaining": remaining, "overdue": overdue, "unsigned": unsigned, "collection_rate": rate, "health": health, "alert": alert, "recommendations": recommendations}
