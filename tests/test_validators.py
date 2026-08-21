@@ -14,6 +14,7 @@ from tap.core.validators import (
     validate_email,
     validate_currency,
     validate_status,
+    validate_month,
 )
 
 
@@ -173,6 +174,21 @@ class TestStatusValidation:
         """Teste qu'un statut invalide est rejeté."""
         with pytest.raises(ValidationError, match="doit être l'une de"):
             validate_status("Premium")
+
+
+class TestMonthValidation:
+    def test_valid_month_formats(self):
+        assert validate_month("2026-07-01") == "2026-07-01"
+        assert validate_month("2026-07") == "2026-07-01"
+        assert validate_month("07/2026") == "2026-07-01"
+
+    def test_empty_month(self):
+        with pytest.raises(ValidationError, match="obligatoire"):
+            validate_month("")
+
+    def test_invalid_month(self):
+        with pytest.raises(ValidationError, match="format invalide"):
+            validate_month("juillet")
 
 
 if __name__ == "__main__":

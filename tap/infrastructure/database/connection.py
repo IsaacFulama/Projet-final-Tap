@@ -5,6 +5,11 @@ import mysql.connector
 
 from tap.config.settings import load_db_config
 
+MESSAGE_BASE_INDISPONIBLE = (
+    "La base de données n'est pas accessible. "
+    "Démarrez MySQL/MariaDB puis réessayez."
+)
+
 
 def _sanitize_identifier(identifier: str) -> str:
     return identifier.replace("`", "``")
@@ -75,7 +80,7 @@ class MySQLConnectionProvider:
 
 
 class ResilientProviderWrapper:
-    def __call__(self) -> ConnectionProtocol:
+    def __call__(self) -> ConnectionProtocol | None:
         from tap.infrastructure.database.resilient_connection import obtenir_connexion_resiliente
         return obtenir_connexion_resiliente()
 
@@ -83,11 +88,50 @@ class ResilientProviderWrapper:
 _default_provider = ResilientProviderWrapper()
 
 
-def obtenir_connexion(provider: ConnectionProvider | None = None) -> ConnectionProtocol:
+def connexion_prete(conn: ConnectionProtocol | None) -> bool:
+    """True seulement si la connexion existe et répond comme ouverte."""
+    if conn is None:
+        return False
+    checker = getattr(conn, "is_connected", None)
+    if not callable(checker):
+        return True
+    try:
+        return bool(checker())
+    except Exception:
+        return False
+
+
+def rollback_si_possible(conn: ConnectionProtocol | None) -> None:
+    if not connexion_prete(conn):
+        return
+    rollback = getattr(conn, "rollback", None)
+    if callable(rollback):
+        try:
+            rollback()
+        except Exception:
+            pass
+
+
+def fermer_connexion(conn: ConnectionProtocol | None, cursor=None) -> None:
+    if cursor is not None:
+        try:
+            cursor.close()
+        except Exception:
+            pass
+    if not connexion_prete(conn):
+        return
+    try:
+        conn.close()
+    except Exception:
+        pass
+
+
+def obtenir_connexion(provider: ConnectionProvider | None = None) -> ConnectionProtocol | None:
     """Obtient une connexion via un fournisseur injectable.
 
     Le provider par défaut reste MySQL, mais les couches amont peuvent injecter
     un faux provider pour les tests ou un autre backend conforme au contrat.
+    Sans serveur MySQL, le provider résilient peut renvoyer None.
     """
     active_provider = provider or _default_provider
     return active_provider()

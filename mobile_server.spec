@@ -10,7 +10,10 @@ a = Analysis(
     datas=[],
     hiddenimports=collect_submodules('tap.mobile') + [
         'mysql.connector',
-    ],
+        'mysql.connector.locales.eng',
+        'qrcode',
+        'PIL',
+    ] + collect_submodules('mysql.connector.locales'),
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -32,6 +35,12 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
+from pathlib import Path
+
+_icon_path = Path.cwd() / "tap.ico"
+if not _icon_path.is_file():
+    _icon_path = Path.cwd() / ".." / "tap.ico"
+
 pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
@@ -44,5 +53,6 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
+    icon=str(_icon_path) if _icon_path.is_file() else None,
     console=True,
 )

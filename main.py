@@ -14,7 +14,7 @@ from tap.core.backup_manager import lancer_backup_en_arriere_plan
 from tap.core.smart_error_handler import smart_error_handler
 from tap.core.data_validator import data_validator
 from tap.core.monthly_reports import generate_and_publish_monthly_report
-from tap.core.startup_manager import ensure_startup_ready
+from tap.core.startup_manager import ensure_startup_ready, start_mobile_server_if_configured
 
 
 def _parse_demo_date(argv: list[str]) -> date | None:
@@ -47,6 +47,10 @@ if __name__ == "__main__":
             print(f"Mises à jour litigieuses: {rapport['mis_a_jour']}")
             print(f"Paiements à suivre: {rapport['paiements_a_suivi']}")
             sys.exit(0)
+
+        # Le portail locataire est prêt dès l'ouverture de l'application.
+        # L'utilisateur final n'a pas à lancer un second programme.
+        start_mobile_server_if_configured()
 
         # Exécuter la mise à jour automatique des statuts au démarrage
         executer_mise_a_jour_automatique()

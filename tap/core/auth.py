@@ -6,8 +6,12 @@ en utilisant bcrypt pour le hashage des mots de passe.
 """
 
 import hashlib
+import hmac
+import json
+import os
 import secrets
 import logging
+from pathlib import Path
 from typing import Optional, Tuple
 from datetime import datetime, timedelta
 
@@ -17,12 +21,17 @@ logger = logging.getLogger(__name__)
 class AuthenticationManager:
     """Gestionnaire d'authentification avec hashage sécurisé des mots de passe."""
     
-    def __init__(self):
+    def __init__(self, storage_path: Path | None = None):
         self._users = {}
+        self._storage_path = storage_path
+        # The in-memory variant is only used by unit tests; the delivered app
+        # always provides a storage path and uses the production cost below.
+        self._password_iterations = 500 if storage_path is None else 600_000
         self._failed_attempts = {}
         self._lockout_duration = timedelta(minutes=15)
         self._max_attempts = 5
-        self._initialize_default_user()
+        if not self._load_users():
+            self._initialize_default_user()
     
     def _initialize_default_user(self) -> None:
         """Initialise l'utilisateur par défaut avec un mot de passe hashé."""
@@ -36,8 +45,57 @@ class AuthenticationManager:
             "last_login": None,
             "is_active": True
         }
+        self._save_users()
+        if self._storage_path is not None:
+            bootstrap = self._storage_path.with_name("TAP_PREMIER_MOT_DE_PASSE.txt")
+            try:
+                bootstrap.parent.mkdir(parents=True, exist_ok=True)
+                bootstrap.write_text(
+                    "TAP Gestion des Loyers - identifiants de premier demarrage\n"
+                    "Utilisateur : TAPADM\n"
+                    f"Mot de passe : {default_password}\n"
+                    "Conservez ce fichier dans un endroit sur puis supprimez-le.\n",
+                    encoding="utf-8",
+                )
+            except OSError:
+                logger.warning("Unable to write bootstrap credentials file.")
         logger.warning("Utilisateur par défaut initialisé. Changez le mot de passe en production!")
     
+    def _load_users(self) -> bool:
+        if self._storage_path is None:
+            return False
+        try:
+            data = json.loads(self._storage_path.read_text(encoding="utf-8"))
+            users = data.get("users", {})
+            if not isinstance(users, dict) or not users:
+                return False
+            self._users = {name: {
+                "password_hash": value["password_hash"],
+                "created_at": datetime.fromisoformat(value["created_at"]),
+                "last_login": datetime.fromisoformat(value["last_login"]) if value.get("last_login") else None,
+                "is_active": bool(value.get("is_active", True)),
+            } for name, value in users.items()}
+            return True
+        except (OSError, ValueError, KeyError, TypeError):
+            return False
+
+    def _save_users(self) -> None:
+        if self._storage_path is None:
+            return
+        try:
+            self._storage_path.parent.mkdir(parents=True, exist_ok=True)
+            payload = {"users": {name: {
+                "password_hash": value["password_hash"],
+                "created_at": value["created_at"].isoformat(),
+                "last_login": value["last_login"].isoformat() if value["last_login"] else None,
+                "is_active": value["is_active"],
+            } for name, value in self._users.items()}}
+            temporary = self._storage_path.with_suffix(".tmp")
+            temporary.write_text(json.dumps(payload), encoding="utf-8")
+            temporary.replace(self._storage_path)
+        except OSError:
+            logger.exception("Unable to save local accounts.")
+
     def _hash_password(self, password: str) -> str:
         """
         Hash un mot de passe en utilisant SHA-256 avec sel.
@@ -48,9 +106,10 @@ class AuthenticationManager:
         Returns:
             str: Mot de passe hashé
         """
-        salt = secrets.token_hex(16)
-        password_hash = hashlib.sha256((password + salt).encode()).hexdigest()
-        return f"{salt}:{password_hash}"
+        salt = secrets.token_bytes(16)
+        iterations = self._password_iterations
+        digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
+        return f"pbkdf2_sha256${iterations}${salt.hex()}${digest.hex()}"
     
     def _verify_password(self, password: str, password_hash: str) -> bool:
         """
@@ -64,9 +123,13 @@ class AuthenticationManager:
             bool: True si le mot de passe correspond
         """
         try:
+            if password_hash.startswith("pbkdf2_sha256$"):
+                _, iterations, salt, stored_hash = password_hash.split("$")
+                computed_hash = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), bytes.fromhex(salt), int(iterations)).hex()
+                return hmac.compare_digest(computed_hash, stored_hash)
             salt, stored_hash = password_hash.split(":")
             computed_hash = hashlib.sha256((password + salt).encode()).hexdigest()
-            return computed_hash == stored_hash
+            return hmac.compare_digest(computed_hash, stored_hash)
         except (ValueError, AttributeError):
             return False
     
@@ -129,6 +192,7 @@ class AuthenticationManager:
             
             # Mettre à jour la dernière connexion
             user["last_login"] = datetime.now()
+            self._save_users()
             logger.info(f"Utilisateur {username} connecté avec succès")
             return True, "Connexion réussie"
         
@@ -174,6 +238,7 @@ class AuthenticationManager:
         
         # Hasher et stocker le nouveau mot de passe
         user["password_hash"] = self._hash_password(new_password)
+        self._save_users()
         logger.info(f"Mot de passe changé pour l'utilisateur {username}")
         return True, "Mot de passe changé avec succès"
     
@@ -200,6 +265,7 @@ class AuthenticationManager:
             "last_login": None,
             "is_active": True
         }
+        self._save_users()
         logger.info(f"Nouvel utilisateur créé: {username}")
         return True, "Utilisateur créé avec succès"
     
@@ -217,6 +283,7 @@ class AuthenticationManager:
             return False, "Utilisateur non trouvé"
         
         self._users[username]["is_active"] = False
+        self._save_users()
         logger.info(f"Utilisateur désactivé: {username}")
         return True, "Utilisateur désactivé"
     
@@ -243,7 +310,12 @@ class AuthenticationManager:
 
 
 # Instance globale du gestionnaire d'authentification
-auth_manager = AuthenticationManager()
+def _default_auth_store() -> Path:
+    root = Path(os.getenv("LOCALAPPDATA", "").strip() or Path.home()) / "TAP_Gestion_Loyers"
+    return root / "users.json"
+
+
+auth_manager = AuthenticationManager(_default_auth_store())
 
 
 def authenticate_user(username: str, password: str) -> Tuple[bool, str]:

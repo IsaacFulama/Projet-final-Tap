@@ -1,0 +1,76 @@
+('E:\\Amour '
+ 'Parfait\\packaging\\release_build_onedir\\release_gui_onedir\\TAP_Gestion_Loyers.pkg',
+ {'BINARY': True,
+  'DATA': True,
+  'EXECUTABLE': True,
+  'EXTENSION': True,
+  'PYMODULE': True,
+  'PYSOURCE': True,
+  'PYZ': False,
+  'SPLASH': True,
+  'SYMLINK': False},
+ [('pyi-contents-directory _internal', '', 'OPTION'),
+  ('PYZ-00.pyz',
+   'E:\\Amour '
+   'Parfait\\packaging\\release_build_onedir\\release_gui_onedir\\PYZ-00.pyz',
+   'PYZ'),
+  ('struct',
+   'E:\\Amour '
+   'Parfait\\packaging\\release_build_onedir\\release_gui_onedir\\localpycs\\struct.pyc',
+   'PYMODULE'),
+  ('pyimod01_archive',
+   'E:\\Amour '
+   'Parfait\\packaging\\release_build_onedir\\release_gui_onedir\\localpycs\\pyimod01_archive.pyc',
+   'PYMODULE'),
+  ('pyimod02_importers',
+   'E:\\Amour '
+   'Parfait\\packaging\\release_build_onedir\\release_gui_onedir\\localpycs\\pyimod02_importers.pyc',
+   'PYMODULE'),
+  ('pyimod03_ctypes',
+   'E:\\Amour '
+   'Parfait\\packaging\\release_build_onedir\\release_gui_onedir\\localpycs\\pyimod03_ctypes.pyc',
+   'PYMODULE'),
+  ('pyimod04_pywin32',
+   'E:\\Amour '
+   'Parfait\\packaging\\release_build_onedir\\release_gui_onedir\\localpycs\\pyimod04_pywin32.pyc',
+   'PYMODULE'),
+  ('pyiboot01_bootstrap',
+   'E:\\Amour '
+   'Parfait\\.venv\\Lib\\site-packages\\PyInstaller\\loader\\pyiboot01_bootstrap.py',
+   'PYSOURCE'),
+  ('tk_runtime_hook',
+   'E:\\Amour Parfait\\packaging\\tk_runtime_hook.py',
+   'PYSOURCE'),
+  ('pyi_rth_inspect',
+   'E:\\Amour '
+   'Parfait\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_inspect.py',
+   'PYSOURCE'),
+  ('pyi_rth__tkinter',
+   'E:\\Amour '
+   'Parfait\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth__tkinter.py',
+   'PYSOURCE'),
+  ('pyi_rth_pkgutil',
+   'E:\\Amour '
+   'Parfait\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_pkgutil.py',
+   'PYSOURCE'),
+  ('pyi_rth_multiprocessing',
+   'E:\\Amour '
+   'Parfait\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_multiprocessing.py',
+   'PYSOURCE'),
+  ('pyi_rth_mplconfig',
+   'E:\\Amour '
+   'Parfait\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_mplconfig.py',
+   'PYSOURCE'),
+  ('pyi_rth_setuptools',
+   'E:\\Amour '
+   'Parfait\\.venv\\Lib\\site-packages\\PyInstaller\\hooks\\rthooks\\pyi_rth_setuptools.py',
+   'PYSOURCE'),
+  ('main', 'E:\\Amour Parfait\\main.py', 'PYSOURCE')],
+ 'python313.dll',
+ True,
+ False,
+ False,
+ [],
+ None,
+ None,
+ None)

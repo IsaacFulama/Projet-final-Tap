@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -65,10 +66,26 @@ def load_app_config() -> dict:
 
 
 def _config_search_paths(base_dir: Path) -> list[Path]:
-    """Retourne les emplacements de configuration, sans dépendre d'un nom de livraison."""
-    paths = [Path.cwd() / "config.json", base_dir / "config.json"]
+    """Retourne les emplacements fiables de configuration.
+
+    Le répertoire courant n'est pas fiable pour une application Windows : un
+    raccourci peut définir un autre dossier de travail ou y laisser un ancien
+    ``config.json``. Le fichier situé à côté de l'exécutable est prioritaire.
+    ``TAP_CONFIG`` permet de choisir explicitement un fichier administré.
+    """
+    paths = []
+    configured_path = os.environ.get("TAP_CONFIG")
+    if configured_path:
+        paths.append(Path(configured_path).expanduser())
+
+    paths.append(base_dir / "config.json")
     if getattr(sys, "_MEIPASS", None):
         paths.append(Path(sys._MEIPASS) / "config.json")
-    for directory in sorted(base_dir.glob("CLIENT_*/")):
-        paths.append(directory / "config.json")
+
+    # Fallback utile pour le lancement depuis les sources, mais seulement
+    # après la configuration de livraison.
+    cwd_config = Path.cwd() / "config.json"
+    if cwd_config.parent.resolve() != base_dir.resolve():
+        paths.append(cwd_config)
+
     return list(dict.fromkeys(paths))

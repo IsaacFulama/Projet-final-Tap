@@ -1,0 +1,8 @@
+FROM python:3.13-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt gunicorn
+COPY . .
+ENV TAP_MOBILE_HOST=0.0.0.0
+ENV TAP_MOBILE_PORT=10000
+CMD ["gunicorn", "-b", "0.0.0.0:10000", "--workers", "2", "--timeout", "60", "tap.mobile.api:create_app()"]

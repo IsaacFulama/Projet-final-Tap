@@ -16,7 +16,11 @@ from typing import Any
 from flask import Flask, jsonify, request
 from werkzeug.serving import make_server
 
-from tap.infrastructure.database.connection import obtenir_connexion
+from tap.infrastructure.database.connection import (
+    MESSAGE_BASE_INDISPONIBLE,
+    connexion_prete,
+    obtenir_connexion,
+)
 from tap.infrastructure.database.repository import (
     enregistrer_signature_et_mettre_a_jour_paiement,
 )
@@ -194,6 +198,9 @@ class LocalSignatureServer:
 
 def build_signature_payload(payment_meta: dict[str, Any]) -> dict[str, str]:
     full_name = f"{payment_meta.get('nom', '')} {payment_meta.get('prenom', '')}".strip()
+    montant_versement = payment_meta.get("montant_versement")
+    if montant_versement in (None, ""):
+        montant_versement = payment_meta.get("montant_paye")
     return {
         "paiement_id": int(payment_meta.get("paiement_id", 0)),
         "locataire_id": str(payment_meta.get("locataire_id", "")),
@@ -204,7 +211,7 @@ def build_signature_payload(payment_meta: dict[str, Any]) -> dict[str, str]:
         "montant": str(payment_meta.get("montant", "")),
         "montant_total": str(payment_meta.get("montant_total", payment_meta.get("montant", "0"))),
         "montant_paye": str(payment_meta.get("montant_paye", "")),
-        "montant_paye_signature": str(payment_meta.get("montant_paye_signature", "0")),
+        "montant_paye_signature": str(montant_versement or "0"),
         "reste_a_payer": str(payment_meta.get("reste_a_payer", "")),
         "devise": str(payment_meta.get("devise", "")),
         "statut": str(payment_meta.get("statut", "")),
@@ -240,6 +247,8 @@ def save_signature(
 ) -> None:
     payload = session.payload
     conn = obtenir_connexion()
+    if not connexion_prete(conn):
+        raise ValueError(MESSAGE_BASE_INDISPONIBLE)
     try:
         cursor = conn.cursor()
         cursor.execute(
@@ -263,7 +272,7 @@ def save_signature(
         conn.commit()
         cursor.close()
     finally:
-        if conn is not None and conn.is_connected():
+        if connexion_prete(conn):
             conn.close()
 
 
@@ -284,11 +293,12 @@ def get_lan_ip() -> str:
 def render_signature_page(token: str, session: SignatureSession) -> str:
     p = session.payload
     title = "Confirmation de paiement" if p.get("statut") == "En règle" else "Accord de paiement"
+    montant_paye_signature = f"{p.get('montant_paye_signature', '0')} {p.get('devise', '')}".strip()
     rows = [
         ("Locataire", p.get("signataire_nom", "")),
         ("Mois", p.get("mois", "")),
         ("Montant total", f"{p.get('montant_total', '')} {p.get('devise', '')}".strip()),
-        ("Montant paye", f"{p.get('montant_paye', '')} {p.get('devise', '')}".strip()),
+        ("Montant payé maintenant", montant_paye_signature),
         ("Reste a payer", f"{p.get('reste_a_payer', '')} {p.get('devise', '')}".strip()),
         ("Statut", p.get("statut", "")),
     ]
@@ -384,6 +394,8 @@ window.addEventListener('resize', resize);
 def get_litigious_payments_for_locataire(locataire_id: int) -> list[dict[str, Any]]:
     """Récupère tous les paiements litigieux d'un locataire."""
     conn = obtenir_connexion()
+    if not connexion_prete(conn):
+        return []
     try:
         cursor = conn.cursor(dictionary=True)
         cursor.execute(
@@ -402,7 +414,7 @@ def get_litigious_payments_for_locataire(locataire_id: int) -> list[dict[str, An
         print(f"Erreur lors de la récupération des paiements litigieux: {e}")
         return []
     finally:
-        if conn is not None and conn.is_connected():
+        if connexion_prete(conn):
             conn.close()
 
 
@@ -418,12 +430,13 @@ def render_signed_receipt_page(session: SignatureSession) -> str:
     is_paid = p.get("statut", "") == "En règle"
     document_type = "REÇU DE PAIEMENT" if is_paid else "ACCORD DE PAIEMENT"
     document_color = "#2e7d32" if is_paid else "#d32f2f"
+    montant_paye_signature = f"{p.get('montant_paye_signature', '0')} {p.get('devise', '')}".strip()
     
     rows = [
         ("Locataire", p.get("signataire_nom", "")),
         ("Mois concerné", p.get("mois", "")),
         ("Montant total du mois", f"{p.get('montant_total', '')} {p.get('devise', '')}".strip()),
-        ("Montant payé", f"{p.get('montant_paye', '')} {p.get('devise', '')}".strip()),
+        ("Montant payé maintenant", montant_paye_signature),
         ("Reste à payer", f"{p.get('reste_a_payer', '')} {p.get('devise', '')}".strip()),
         ("Statut du paiement", p.get("statut", "")),
     ]

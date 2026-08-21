@@ -29,6 +29,8 @@ from tap.core.dashboard_service import calculate_dashboard_metrics
 from tap.core.models import HistoryPayment, SubscriptionRecord
 from tap.core.local_signature import start_signature_session
 from tap.mobile.portal_service import create_portal_token
+from tap.mobile.payment_links import create_payment_link
+from tap.mobile.runtime import portal_url, payment_link_url, configure_mobile_environment
 from tap.core.payment_service import PaymentService, SubscriptionFilters
 from tap.core.whatsapp_reports import send_overdue_payment_reminders
 from tap.presentation.components.widgets import SidebarButton, StatCard
@@ -36,9 +38,84 @@ from tap.presentation.dialogs.export_pdf import ExportPDFDialog
 from tap.presentation.dialogs.formulaire import FormulaireSouscription, NouveauSouscripteurDialog
 from tap.presentation.dialogs.archives import DialogArchives
 from tap.presentation.dialogs.signature_qr import SignatureQRDialog
+from tap.presentation.dialogs.portal_qr import PortalQRDialog
+from tap.presentation.dialogs.payment_proofs import PaymentProofsDialog
 
 ctk.set_appearance_mode("Light")
 ctk.set_default_color_theme("blue")
+
+
+# ── Helpers de robustesse pour dialogues CTk ────────────────────────────────
+
+def _assurer_root_disponible(toplevel):
+    """
+    Enregistre explicitement le root Tk comme default_root avant de construire CTkFont.
+    Corrige : RuntimeError("Too early to use font: no default root window")
+    sur les 2èmes+ ouvertures après destruction d'anciens dialogues.
+    """
+    try:
+        import tkinter
+        master = getattr(toplevel, 'master', None)
+        root = None
+        if master is not None:
+            try:
+                root = master.winfo_toplevel()
+                while hasattr(root, 'master') and root.master is not None:
+                    root = root.master
+            except Exception:
+                pass
+        if root is None or not getattr(root, 'winfo_exists', lambda: False)():
+            try:
+                root = tkinter._default_root
+            except Exception:
+                root = None
+        if root is not None:
+            try:
+                tkinter._default_root = root
+            except Exception:
+                pass
+        try:
+            if hasattr(root, 'tk') and root.tk is not None:
+                root.tk.call('tk', 'useinputmethods', '1')
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
+def _annuler_after_callbacks(widget):
+    """
+    Annule TOUS les callbacks after enregistrés sur un widget et ses enfants.
+    Corrige : "invalid command name xxxupdate" / "xxxcheck_dpi_scaling"
+    (customtkinter interne qui relance after sur widgets détruits)
+    """
+    try:
+        if not getattr(widget, 'winfo_exists', lambda: False)():
+            return
+        children = widget.winfo_children()
+    except Exception:
+        return
+    for child in children:
+        _annuler_after_callbacks(child)
+    try:
+        info = widget.tk.call('after', 'info')
+    except Exception:
+        info = []
+    if info:
+        ids = []
+        if isinstance(info, (list, tuple)):
+            for item in info:
+                if isinstance(item, str) and (item.startswith('after#') or item[0] in '0123456789'):
+                    ids.append(item)
+                elif isinstance(item, (list, tuple)) and len(item) >= 1:
+                    candidate = item[0]
+                    if isinstance(candidate, str):
+                        ids.append(candidate)
+        for after_id in ids:
+            try:
+                widget.after_cancel(after_id)
+            except Exception:
+                pass
 
 
 # ── StatCard avec animation ─────────────────────────────────────────────────
@@ -85,11 +162,24 @@ class AnimatedStatCard(StatCard):
 
 class HistoriqueDialog(ctk.CTkToplevel):
     """Dialogue d'historique avec tri et export"""
+
+    def _assurer_root_disponible(self):
+        _assurer_root_disponible(self)
+
     def __init__(self, parent, nom, prenom, paiements):
         super().__init__(parent)
         self._screen = detect_screen_profile()
         self._compact_mode = self._screen.width < 1100
+        self.nom = nom
+        self.prenom = prenom
+        self.paiements = [HistoryPayment.from_row(row) for row in paiements]
+        self._sort_column = None
+        self._sort_reverse = False
+        self._closed = False
         self.title(f"Historique - {nom} {prenom}")
+
+        # PRÉ-REQUIS OBLIGATOIRE : assurer le root Tk AVANT CTkFont / UI
+        self._assurer_root_disponible()
         
         # Géométrie responsive
         self.update_idletasks()
@@ -132,16 +222,30 @@ class HistoriqueDialog(ctk.CTkToplevel):
         self.grab_set()
         
         # Raccourcis clavier
-        self.bind("<Escape>", lambda e: self.destroy())
-        self.bind("<Control-w>", lambda e: self.destroy())
-        
-        self.nom = nom
-        self.prenom = prenom
-        self.paiements = [HistoryPayment.from_row(row) for row in paiements]
-        self._sort_column = None
-        self._sort_reverse = False
+        self.bind("<Escape>", lambda e: self._close())
+        self.bind("<Control-w>", lambda e: self._close())
+        self.protocol("WM_DELETE_WINDOW", self._close)
         
         self._build_ui()
+
+    def _close(self):
+        if getattr(self, '_closed', False):
+            return
+        self._closed = True
+        try:
+            self.grab_release()
+        except Exception:
+            pass
+        # ANNULATION AFTER CALLBACKS INTERNES CTK
+        try:
+            _annuler_after_callbacks(self)
+        except Exception:
+            pass
+        # Nettoyer la référence dans le parent si elle existe
+        if hasattr(self.master, '_history_dialog') and self.master._history_dialog == self:
+            self.master._history_dialog = None
+        if self.winfo_exists():
+            self.destroy()
         
     def _build_ui(self):
         """Construit l'interface du dialogue"""
@@ -563,9 +667,19 @@ class AppGestionLoyers(ctk.CTk):
         # Cache des données
         self._all_data: list = []
         self._row_meta: dict[str, dict] = {}
-        
+
         self.payment_service = PaymentService()
-        
+
+        # Références aux dialogues pour éviter le garbage collection
+        self._current_dialog = None
+        self._export_pdf_dialog = None
+        self._archives_dialog = None
+        self._portal_qr_dialog = None
+        self._payment_qr_dialog = None
+        self._signature_qr_dialog = None
+        self._payment_proofs_dialog = None
+        self._history_dialog = None
+
         # Variables d'état
         self.status_var = StringVar(value="Prêt. Connectez-vous aux données ou ajoutez un paiement.")
         self.active_filters = {
@@ -590,6 +704,7 @@ class AppGestionLoyers(ctk.CTk):
         self._current_table_card_columns = None
         self._current_kpi_columns = None
         self._layout_profile = None
+        self._records_need_page_scroll = self._screen.dpi_scale > 1.05 or self._ui_scale > 1.0
         
         # État de chargement
         self._is_loading = False
@@ -686,8 +801,13 @@ class AppGestionLoyers(ctk.CTk):
 
         ctk.CTkFrame(sb, height=1, fg_color=C["border"]).pack(fill="x", padx=24, pady=24)
 
-        nav = ctk.CTkFrame(sb, fg_color="transparent")
-        nav.pack(fill="x", padx=16)
+        nav = ctk.CTkScrollableFrame(
+            sb,
+            fg_color="transparent",
+            scrollbar_button_color=C["border"],
+            scrollbar_button_hover_color=C["accent_dim"],
+        )
+        nav.pack(fill="both", expand=True, padx=16)
 
         self.btn_nav_nouveau = SidebarButton(nav, text="  ➕  Nouveau Souscripteur",
                           fg_color=C["accent"], hover_color=C["accent_dim"],
@@ -724,7 +844,6 @@ class AppGestionLoyers(ctk.CTk):
         for button in self.sidebar_buttons:
             button.pack(fill="x", pady=(0, 8))
 
-        ctk.CTkFrame(sb, fg_color="transparent").pack(fill="both", expand=True)
         self.sidebar_footer = ctk.CTkLabel(sb, text="v3.7  ·  TAP Loyers",
                                            font=ctk.CTkFont(size=10),
                                            text_color=C["text_lo"])
@@ -779,7 +898,8 @@ class AppGestionLoyers(ctk.CTk):
         self.tabs.configure(command=self._on_tab_change)
 
         # ── PAGE ENREGISTREMENTS (cachée par défaut) ───────────────────────────
-        self.page_records = ctk.CTkFrame(main, fg_color="transparent")
+        records_container = ctk.CTkScrollableFrame if self._records_need_page_scroll else ctk.CTkFrame
+        self.page_records = records_container(main, fg_color="transparent")
         # Ne pas packer maintenant — cachée par défaut
 
         # Filtres dans la page enregistrements
@@ -841,6 +961,30 @@ class AppGestionLoyers(ctk.CTk):
                                                text_color=C["text_lo"], corner_radius=6,
                                                command=self._reset_filters)
         self.btn_reset_filters.pack(side="left")
+        self.btn_history = ctk.CTkButton(
+            self.filter_actions_row,
+            text="📋 Historique",
+            width=112,
+            height=32,
+            fg_color=C["bg_section"],
+            hover_color=C["border"],
+            text_color=C["text_hi"],
+            corner_radius=6,
+            command=self.afficher_historique_locataire,
+        )
+        self.btn_history.pack(side="left", padx=(10, 0))
+        self.btn_payment_proofs = ctk.CTkButton(
+            self.filter_actions_row,
+            text="💳 À valider",
+            width=100,
+            height=32,
+            fg_color=C["bg_section"],
+            hover_color=C["border"],
+            text_color=C["text_hi"],
+            corner_radius=6,
+            command=self.ouvrir_preuves_paiement,
+        )
+        self.btn_payment_proofs.pack(side="left", padx=(8, 0))
         
         # Bouton Archives aligné à droite
         self.btn_archives = ctk.CTkButton(self.filter_actions_row, text="🗃️ Archives", width=100, height=32,
@@ -1085,12 +1229,16 @@ class AppGestionLoyers(ctk.CTk):
                                   activeforeground=C["accent"], bd=0)
         self.context_menu.add_command(label="  ✏️  Modifier",
                                        command=self.modifier_paiement)
+        self.context_menu.add_command(label="  📋  Voir l'historique",
+                                       command=self.afficher_historique_locataire)
         self.context_menu.add_command(label="  💰  Ajouter paiement",
                                        command=self.ajouter_paiement)
         self.context_menu.add_command(label="  ✍️  Demander signature QR",
                                        command=self.demander_signature_qr)
         self.context_menu.add_command(label="  📱  Créer lien portail locataire",
                                        command=self.creer_lien_portail_locataire)
+        self.context_menu.add_command(label="  💳  Créer lien de paiement",
+                                       command=self.creer_lien_paiement)
         self.context_menu.add_separator()
         self.context_menu.add_command(label="  ✅  Marquer En règle",
                                        command=lambda: self.modifier_statut("En règle"))
@@ -1573,8 +1721,12 @@ class AppGestionLoyers(ctk.CTk):
 
     # ── LOGIQUE PRINCIPALE ───────────────────────────────────────────────────
     def ouvrir_formulaire(self):
+        # Sécurité : fermer tout dialogue existant avant d'en ouvrir un nouveau
+        self._fermer_dialogues_ouverts()
+
         def _apres_creation(details=None):
             """Recharge les données et navigue vers la page enregistrements."""
+            self._reset_filters()
             self._show_records_page()
             if details and self._montant_positif(details.get("montant_paye", 0)):
                 paiement_id = details.get("paiement_id")
@@ -1583,8 +1735,38 @@ class AppGestionLoyers(ctk.CTk):
                         paiement_id,
                         details.get("montant_paye"),
                     )
+            # Nettoyer la référence après fermeture
+            if self._current_dialog is not None and not self._current_dialog.winfo_exists():
+                self._current_dialog = None
 
-        NouveauSouscripteurDialog(self, callback_maj_tableau=_apres_creation)
+        # Garder une référence pour éviter le garbage collection
+        self._current_dialog = NouveauSouscripteurDialog(self, callback_maj_tableau=_apres_creation)
+
+    def _fermer_dialogues_ouverts(self):
+        """Ferme proprement tous les dialogues référencés avant d'en ouvrir de nouveaux."""
+        dialog_attrs = [
+            '_current_dialog',
+            '_export_pdf_dialog',
+            '_archives_dialog',
+            '_portal_qr_dialog',
+            '_payment_qr_dialog',
+            '_signature_qr_dialog',
+            '_payment_proofs_dialog',
+            '_history_dialog',
+        ]
+        for attr in dialog_attrs:
+            dialog = getattr(self, attr, None)
+            if dialog is not None:
+                try:
+                    if dialog.winfo_exists():
+                        try:
+                            dialog.grab_release()
+                        except Exception:
+                            pass
+                        dialog.destroy()
+                except Exception:
+                    pass
+                setattr(self, attr, None)
 
     def charger_donnees(self):
         if self._is_loading:
@@ -1875,7 +2057,8 @@ class AppGestionLoyers(ctk.CTk):
     def _show_archives_page(self):
         """Affiche une boîte de dialogue pour les archives."""
         try:
-            DialogArchives(self)
+            # Garder une référence pour éviter le garbage collection
+            self._archives_dialog = DialogArchives(self)
         except Exception as e:
             messagebox.showerror("Erreur", f"Impossible d'ouvrir les archives: {e}")
 
@@ -1997,8 +2180,8 @@ class AppGestionLoyers(ctk.CTk):
             payment_status=meta.get("statut_paiement", "En attente"),
         )
 
-        # Ouvrir le formulaire en mode édition
-        FormulaireSouscription(self, self.charger_donnees, paiement_id, record.to_edit_tuple())
+        # Ouvrir le formulaire en mode édition (référence stockée pour éviter GC)
+        self._current_dialog = FormulaireSouscription(self, self.charger_donnees, paiement_id, record.to_edit_tuple())
 
     def supprimer_paiement(self):
         """Supprime le paiement sélectionné après confirmation"""
@@ -2134,33 +2317,73 @@ class AppGestionLoyers(ctk.CTk):
             return
         try:
             token, expires_at = create_portal_token(int(meta["locataire_id"]), days=30)
-            host = os.getenv("TAP_MOBILE_HOST_PUBLIC", "127.0.0.1")
-            port = os.getenv("TAP_MOBILE_PORT", "8765")
-            url = f"http://{host}:{port}/portal/{token}"
+            configure_mobile_environment()
+            url = portal_url(token)
             self.clipboard_clear()
             self.clipboard_append(url)
-            messagebox.showinfo(
-                "Portail locataire",
-                f"Lien créé pour {meta['nom']} {meta['prenom']}.\n\n"
-                f"Expiration : {expires_at.strftime('%d/%m/%Y %H:%M')}\n\n"
-                f"Le lien a été copié dans le presse-papiers :\n{url}",
-                parent=self,
+            # Garder une référence pour éviter le garbage collection
+            self._portal_qr_dialog = PortalQRDialog(
+                self,
+                url,
+                expires_at.strftime("%d/%m/%Y %H:%M"),
             )
-            self._set_status("✅ Lien du portail locataire copié.")
+            self._set_status("✅ Portail locataire créé : QR affiché et lien copié.")
         except Exception as exc:
             messagebox.showerror("Portail locataire", f"Impossible de créer le lien : {exc}", parent=self)
 
+    def creer_lien_paiement(self):
+        """Crée un lien public temporaire pour transmettre une preuve de paiement."""
+        item_id, meta = self._get_selected_row()
+        if not item_id or not meta:
+            messagebox.showwarning("Avertissement", "Veuillez sélectionner un paiement.", parent=self)
+            return
+        try:
+            token, expires_at, remaining, currency = create_payment_link(
+                int(meta["paiement_id"]), days=7
+            )
+            configure_mobile_environment()
+            url = payment_link_url(token)
+            self.clipboard_clear()
+            self.clipboard_append(url)
+            # Garder une référence pour éviter le garbage collection
+            self._payment_qr_dialog = PortalQRDialog(
+                self,
+                url,
+                expires_at.strftime("%d/%m/%Y %H:%M"),
+                title="Paiement par lien prêt",
+                description=(
+                    f"Le locataire peut envoyer sa preuve depuis son téléphone. "
+                    f"Montant attendu : {remaining} {currency}."
+                ),
+            )
+            self._set_status("✅ Lien de paiement créé : QR affiché et lien copié.")
+        except Exception as exc:
+            messagebox.showerror("Paiement par lien", f"Impossible de créer le lien : {exc}", parent=self)
+
+    def ouvrir_preuves_paiement(self):
+        """Ouvre la file des preuves envoyées par les locataires."""
+        try:
+            self._payment_proofs_dialog = PaymentProofsDialog(self)
+            self._set_status("💳 File des preuves de paiement ouverte.")
+        except Exception as exc:
+            messagebox.showerror(
+                "Preuves de paiement",
+                f"Impossible d'ouvrir les preuves : {exc}",
+                parent=self,
+            )
+
     def _demarrer_signature_qr(self, meta: dict):
         """Démarre la signature QR pour un paiement déjà payé."""
-        # Assurez-vous d'ajouter le montant_paye actuel comme montant_paye_signature
-        # pour qu'il soit inclus dans le payload de la signature et utilisé pour la mise à jour.
-        meta["montant_paye_signature"] = meta["montant_paye"]
+        montant_signature = meta.get("montant_versement", meta.get("montant_paye", 0))
+        meta = dict(meta)
+        meta["montant_paye_signature"] = montant_signature
         try:
             session = start_signature_session(meta)
             self._set_status(
                 f"Signature QR prête pour {meta['nom']} {meta['prenom']}."
             )
-            SignatureQRDialog(
+            # Garder une référence pour éviter le garbage collection
+            self._signature_qr_dialog = SignatureQRDialog(
                 self,
                 session,
                 on_signed=lambda: self._apres_signature_recue(meta),
@@ -2179,6 +2402,8 @@ class AppGestionLoyers(ctk.CTk):
 
     def afficher_historique_locataire(self, event=None):
         """Affiche l'historique des paiements d'un locataire au double-clic"""
+        if self._is_loading:
+            return
         item = ""
         if event is not None and hasattr(event, "y"):
             item = self.tableau.identify_row(event.y)
@@ -2200,7 +2425,16 @@ class AppGestionLoyers(ctk.CTk):
         self._show_loading(f"Chargement de l'historique de {nom} {prenom}...")
         try:
             paiements = self.payment_service.history(meta["locataire_id"])
-            HistoriqueDialog(self, nom, prenom, paiements)
+            if not paiements:
+                messagebox.showinfo(
+                    "Historique",
+                    f"Aucun paiement trouvé pour {nom} {prenom}.",
+                    parent=self,
+                )
+                self._set_status(f"ℹ️ Aucun historique pour {nom} {prenom}.")
+                return
+            # Garder une référence pour éviter le garbage collection
+            self._history_dialog = HistoriqueDialog(self, nom, prenom, paiements)
             self._set_status(f"📋 Historique ouvert pour {nom} {prenom}.")
 
         except Exception as e:
@@ -2214,7 +2448,8 @@ class AppGestionLoyers(ctk.CTk):
         lignes = [self.tableau.item(c)["values"] for c in self.tableau.get_children()]
         description_filtres = self._describe_active_filters()
         self._set_status("📄 Préparation de l’export PDF...")
-        ExportPDFDialog(self, table_data=lignes, filter_summary=description_filtres)
+        # Garder une référence pour éviter le garbage collection
+        self._export_pdf_dialog = ExportPDFDialog(self, table_data=lignes, filter_summary=description_filtres)
 
     def envoyer_rappels_impayes(self):
         """Envoie manuellement les rappels configurés pour les paiements en retard."""

@@ -4,7 +4,12 @@ from decimal import Decimal, InvalidOperation
 from mysql.connector import Error
 
 from tap.core.date_utils import parse_mois_saisie
-from tap.infrastructure.database.connection import ConnectionProvider, obtenir_connexion
+from tap.infrastructure.database.connection import (
+    ConnectionProvider,
+    MESSAGE_BASE_INDISPONIBLE,
+    connexion_prete,
+    obtenir_connexion,
+)
 
 MOIS_SQL_EXPR = "DATE_FORMAT(p.mois, '%m/%Y')"
 
@@ -397,100 +402,97 @@ def inserer_souscription(
 
     try:
         conn = obtenir_connexion(connection_provider)
-        if conn.is_connected():
-            cursor = conn.cursor()
+        if not connexion_prete(conn):
+            return _result(False, MESSAGE_BASE_INDISPONIBLE)
+        cursor = conn.cursor()
 
-            # Recherche insensible à la casse et tolérante aux espaces.
-            cursor.execute(
-                "SELECT id, telephone FROM locataires "
-                "WHERE LOWER(TRIM(nom)) = LOWER(TRIM(%s)) "
-                "AND LOWER(TRIM(prenom)) = LOWER(TRIM(%s)) "
-                "ORDER BY id ASC LIMIT 1",
-                (nom, prenom),
+        # Recherche insensible à la casse et tolérante aux espaces avec téléphone pour distinction
+        cursor.execute(
+            "SELECT id, telephone FROM locataires "
+            "WHERE LOWER(TRIM(nom)) = LOWER(TRIM(%s)) "
+            "AND LOWER(TRIM(prenom)) = LOWER(TRIM(%s)) "
+            "ORDER BY id ASC LIMIT 1",
+            (nom, prenom),
+        )
+        result = cursor.fetchone()
+
+        # Toujours créer un nouveau locataire pour permettre plusieurs personnes avec le même nom
+        # Le téléphone est optionnel, peut être NULL
+        telephone_value = telephone if telephone else None
+        # Créer un nouveau curseur pour l'INSERT
+        insert_cursor = conn.cursor()
+        insert_cursor.execute(
+            "INSERT INTO locataires (nom, prenom, telephone) VALUES (%s, %s, %s)",
+            (nom, prenom, telephone_value),
+        )
+        locataire_id = insert_cursor.lastrowid
+        insert_cursor.close()
+
+        type_souscription = statut_souscription or "Simple"
+        if type_souscription == "Spécial" and montant_paye_effectif > 0:
+            allocations = _allouer_versement_special(
+                cursor,
+                locataire_id,
+                mois_date,
+                montant_total,
+                devise,
+                montant_paye_effectif,
+                creer_mois_cible=True,
             )
-            result = cursor.fetchone()
-
-            if result:
-                locataire_id = result[0]
-                # Si un téléphone est fourni et différent, on peut mettre à jour (optionnel)
-                if telephone and telephone != result[1]:
-                    # Créer un nouveau curseur pour l'UPDATE
-                    update_cursor = conn.cursor()
-                    update_cursor.execute(
-                        "UPDATE locataires SET telephone = %s WHERE id = %s",
-                        (telephone, locataire_id),
-                    )
-                    update_cursor.close()
-            else:
-                # Le téléphone est optionnel, peut être NULL
-                telephone_value = telephone if telephone else None
-                # Créer un nouveau curseur pour l'INSERT
-                insert_cursor = conn.cursor()
-                insert_cursor.execute(
-                    "INSERT INTO locataires (nom, prenom, telephone) VALUES (%s, %s, %s)",
-                    (nom, prenom, telephone_value),
-                )
-                locataire_id = insert_cursor.lastrowid
-                insert_cursor.close()
-
-            type_souscription = statut_souscription or "Simple"
-            if type_souscription == "Spécial" and montant_paye_effectif > 0:
-                allocations = _allouer_versement_special(
-                    cursor,
-                    locataire_id,
-                    mois_date,
-                    montant_total,
-                    devise,
-                    montant_paye_effectif,
-                    creer_mois_cible=True,
-                )
-                conn.commit()
-                details = {
-                    "paiement_id": allocations[0]["id"] if allocations else None,
-                    "locataire_id": locataire_id,
-                    "montant_paye": float(montant_paye_effectif),
-                    "allocation_speciale": True,
-                }
-                message = _message_allocation_special(allocations)
-                return _result(True, message, details)
-
-            # Insertion classique pour les souscriptions Simples ou sans versement.
-            # Le montant payé stocké inclut aussi l'avance éventuelle.
-            cursor.execute(
-                "INSERT INTO paiements (locataire_id, mois, montant, montant_total, montant_paye, reste_a_payer, devise, statut, statut_souscription, statut_paiement) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                (
-                    locataire_id,
-                    mois_date,
-                    montant_souscrit,
-                    montant_souscrit,
-                    montant_paye_effectif,
-                    reste_a_payer,
-                    devise,
-                    statut or "En attente",
-                    type_souscription,
-                    statut_paiement,
-                ),
-            )
-            paiement_id = cursor.lastrowid
-
             conn.commit()
             details = {
-                "paiement_id": paiement_id,
+                "paiement_id": allocations[0]["id"] if allocations else None,
                 "locataire_id": locataire_id,
                 "montant_paye": float(montant_paye_effectif),
-                "allocation_speciale": False,
+                "allocation_speciale": True,
             }
-            return _result(True, "Enregistrement réussi avec succès !", details)
+            message = _message_allocation_special(allocations)
+            return _result(True, message, details)
+
+        # Insertion classique pour les souscriptions Simples ou sans versement.
+        # Le montant payé stocké inclut aussi l'avance éventuelle.
+        cursor.execute(
+            "INSERT INTO paiements (locataire_id, mois, montant, montant_total, montant_paye, reste_a_payer, devise, statut, statut_souscription, statut_paiement) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            (
+                locataire_id,
+                mois_date,
+                montant_souscrit,
+                montant_souscrit,
+                montant_paye_effectif,
+                reste_a_payer,
+                devise,
+                statut or "En attente",
+                type_souscription,
+                statut_paiement,
+            ),
+        )
+        paiement_id = cursor.lastrowid
+
+        conn.commit()
+        details = {
+            "paiement_id": paiement_id,
+            "locataire_id": locataire_id,
+            "montant_paye": float(montant_paye_effectif),
+            "allocation_speciale": False,
+        }
+        return _result(True, "Enregistrement réussi avec succès !", details)
 
     except (Error, ValueError) as e:
-        if "conn" in locals() and conn.is_connected():
+        if connexion_prete(locals().get("conn")):
             conn.rollback()
         return _result(False, f"Erreur de base de données : {e}")
     finally:
-        if "conn" in locals() and conn.is_connected():
-            cursor.close()
-            conn.close()
+        if "cursor" in locals() and cursor is not None:
+            try:
+                cursor.close()
+            except Exception:
+                pass
+        if connexion_prete(locals().get("conn")):
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 def recuperer_inventaire(
@@ -500,6 +502,8 @@ def recuperer_inventaire(
 ):
     try:
         conn = obtenir_connexion(connection_provider)
+        if not connexion_prete(conn):
+            return []
         cursor = conn.cursor()
 
         query = (
@@ -525,7 +529,7 @@ def recuperer_inventaire(
     finally:
         if "cursor" in locals():
             cursor.close()
-        if "conn" in locals() and conn.is_connected():
+        if connexion_prete(locals().get("conn")):
             conn.close()
 
 
@@ -536,6 +540,8 @@ def mettre_a_jour_statut(
 ):
     try:
         conn = obtenir_connexion(connection_provider)
+        if not connexion_prete(conn):
+            return False, MESSAGE_BASE_INDISPONIBLE
         cursor = conn.cursor()
 
         query = "UPDATE paiements SET statut = %s WHERE id = %s"
@@ -546,13 +552,20 @@ def mettre_a_jour_statut(
         return True, "Statut mis à jour avec succès !"
 
     except Error as e:
-        if "conn" in locals() and conn.is_connected():
+        if connexion_prete(locals().get("conn")):
             conn.rollback()
         return False, f"Erreur de mise à jour : {e}"
     finally:
-        if "conn" in locals() and conn.is_connected():
-            cursor.close()
-            conn.close()
+        if "cursor" in locals() and cursor is not None:
+            try:
+                cursor.close()
+            except Exception:
+                pass
+        if connexion_prete(locals().get("conn")):
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 def get_souscriptions(
@@ -590,7 +603,7 @@ def get_souscriptions_avec_filtres(
     cursor = None
     try:
         conn = obtenir_connexion(connection_provider)
-        if conn is None:
+        if not connexion_prete(conn):
             return []
 
         cursor = conn.cursor()
@@ -642,7 +655,7 @@ def get_souscriptions_avec_filtres(
                 cursor.close()
             except Exception:
                 pass
-        if conn is not None and hasattr(conn, "is_connected") and conn.is_connected():
+        if connexion_prete(conn):
             try:
                 conn.close()
             except Exception:
@@ -653,18 +666,56 @@ def get_historique_locataire(
     locataire_id,
     connection_provider: ConnectionProvider | None = None,
 ):
+    """Retourne l'historique avec compatibilité pour les anciennes bases.
+
+    Les premières versions de TAP ne possédaient pas encore les colonnes de
+    suivi des versements. L'historique ne doit pas devenir inutilisable si une
+    base n'a pas encore reçu toutes les migrations : on utilise alors le
+    format historique minimal et le modèle applique des valeurs sûres.
+    """
     conn = obtenir_connexion(connection_provider)
+    if not connexion_prete(conn):
+        return []
     cursor = conn.cursor()
     try:
         query = (
-            f"SELECT {MOIS_SQL_EXPR} AS mois, p.montant, p.devise, p.statut_souscription, p.statut, "
-            "p.montant_total, p.montant_paye, p.reste_a_payer, p.statut_paiement "
-            "FROM paiements p "
+            f"SELECT {MOIS_SQL_EXPR} AS mois, p.montant, p.devise, "
+            "p.statut_souscription, p.statut, "
+            "COALESCE(p.montant_total, p.montant) AS montant_total, "
+            "COALESCE(p.montant_paye, 0) AS montant_paye, "
+            "COALESCE(p.reste_a_payer, GREATEST(0, p.montant - COALESCE(p.montant_paye, 0))) AS reste_a_payer, "
+            "COALESCE(p.statut_paiement, "
+            "CASE WHEN COALESCE(p.montant_paye, 0) >= COALESCE(p.montant_total, p.montant) "
+            "THEN 'Complet' WHEN COALESCE(p.montant_paye, 0) > 0 "
+            "THEN 'Partiel' ELSE 'En attente' END) AS statut_paiement "
+            "FROM ("
+            "SELECT id, locataire_id, mois, montant, devise, statut_souscription, statut, "
+            "montant_total, montant_paye, reste_a_payer, statut_paiement "
+            "FROM paiements "
+            "UNION ALL "
+            "SELECT id, locataire_id, mois, montant, devise, statut_souscription, statut, "
+            "montant_total, montant_paye, reste_a_payer, statut_paiement "
+            "FROM archives_paiements"
+            ") p "
             "WHERE p.locataire_id = %s "
             "ORDER BY p.mois DESC, p.id DESC"
         )
-        cursor.execute(query, (locataire_id,))
-        return cursor.fetchall()
+        try:
+            cursor.execute(query, (locataire_id,))
+            return cursor.fetchall()
+        except Error:
+            # Repli pour un schéma ancien : les migrations pourront toujours
+            # compléter la base au prochain démarrage.
+            cursor.close()
+            cursor = conn.cursor()
+            cursor.execute(
+                f"SELECT {MOIS_SQL_EXPR} AS mois, p.montant, p.devise, "
+                "p.statut_souscription, p.statut "
+                "FROM paiements p WHERE p.locataire_id = %s "
+                "ORDER BY p.mois DESC, p.id DESC",
+                (locataire_id,),
+            )
+            return cursor.fetchall()
     finally:
         cursor.close()
         conn.close()
@@ -697,115 +748,98 @@ def modifier_souscription(
 
     try:
         conn = obtenir_connexion(connection_provider)
-        if conn.is_connected():
-            cursor = conn.cursor()
+        if not connexion_prete(conn):
+            return False, MESSAGE_BASE_INDISPONIBLE
+        cursor = conn.cursor()
 
-            # Récupérer le locataire_id actuel
-            cursor.execute(
-                "SELECT locataire_id FROM paiements WHERE id = %s",
-                (paiement_id,),
-            )
-            result = cursor.fetchone()
-            if not result:
-                return False, "Paiement non trouvé."
+        # Récupérer le locataire_id actuel
+        cursor.execute(
+            "SELECT locataire_id FROM paiements WHERE id = %s",
+            (paiement_id,),
+        )
+        result = cursor.fetchone()
+        if not result:
+            return False, "Paiement non trouvé."
 
-            locataire_id = result[0]
+        locataire_id = result[0]
 
-            # Mettre à jour ou réutiliser le locataire (recherche insensible à la casse
-            # et tolérante aux espaces) afin de ne jamais créer un doublon.
-            # Créer un nouveau curseur pour cette requête
-            locataire_cursor = conn.cursor()
-            locataire_cursor.execute(
-                "SELECT id, telephone FROM locataires "
-                "WHERE LOWER(TRIM(nom)) = LOWER(TRIM(%s)) "
-                "AND LOWER(TRIM(prenom)) = LOWER(TRIM(%s)) "
-                "ORDER BY id ASC LIMIT 1",
-                (nom, prenom),
-            )
-            locataire_result = locataire_cursor.fetchone()
-            locataire_cursor.close()
+        # Toujours créer un nouveau locataire pour permettre plusieurs personnes avec le même nom
+        # Le téléphone est optionnel, peut être NULL
+        telephone_value = telephone if telephone else None
+        # Créer un nouveau curseur pour l'INSERT
+        insert_cursor = conn.cursor()
+        insert_cursor.execute(
+            "INSERT INTO locataires (nom, prenom, telephone) VALUES (%s, %s, %s)",
+            (nom, prenom, telephone_value),
+        )
+        new_locataire_id = insert_cursor.lastrowid
+        insert_cursor.close()
 
-            if locataire_result:
-                new_locataire_id = locataire_result[0]
-                # Si un téléphone est fourni et différent, on peut mettre à jour (optionnel)
-                if telephone and telephone != locataire_result[1]:
-                    # Créer un nouveau curseur pour l'UPDATE
-                    update_cursor = conn.cursor()
-                    update_cursor.execute(
-                        "UPDATE locataires SET telephone = %s WHERE id = %s",
-                        (telephone, new_locataire_id),
-                    )
-                    update_cursor.close()
-            else:
-                # Le téléphone est optionnel, peut être NULL
-                telephone_value = telephone if telephone else None
-                # Créer un nouveau curseur pour l'INSERT
-                insert_cursor = conn.cursor()
-                insert_cursor.execute(
-                    "INSERT INTO locataires (nom, prenom, telephone) VALUES (%s, %s, %s)",
-                    (nom, prenom, telephone_value),
-                )
-                new_locataire_id = insert_cursor.lastrowid
-                insert_cursor.close()
+        if montant_paye is None:
+            montant_paye = 0.0
+        if avance is None:
+            avance = 0.0
+        if montant_paye in (None, ""):
+            montant_paye = 0.0
+        if avance in (None, ""):
+            avance = 0.0
 
-            if montant_paye is None:
-                montant_paye = 0.0
-            if avance is None:
-                avance = 0.0
-            if montant_paye in (None, ""):
-                montant_paye = 0.0
-            if avance in (None, ""):
-                avance = 0.0
+        montant_paye_val = float(montant_paye)
+        avance_val = float(avance)
+        montant_total = float(montant_souscrit)
+        montant_paye_effectif = montant_paye_val + avance_val
+        reste_a_payer = max(0, montant_total - montant_paye_effectif)
 
-            montant_paye_val = float(montant_paye)
-            avance_val = float(avance)
-            montant_total = float(montant_souscrit)
-            montant_paye_effectif = montant_paye_val + avance_val
-            reste_a_payer = max(0, montant_total - montant_paye_effectif)
+        if montant_paye_effectif >= montant_total:
+            statut_paiement = "Complet"
+        elif montant_paye_effectif > 0:
+            statut_paiement = "Partiel"
+        else:
+            statut_paiement = "En attente"
 
-            if montant_paye_effectif >= montant_total:
-                statut_paiement = "Complet"
-            elif montant_paye_effectif > 0:
-                statut_paiement = "Partiel"
-            else:
-                statut_paiement = "En attente"
+        if montant_paye_effectif >= montant_total:
+            statut = "En règle"
+        elif montant_paye_effectif > 0:
+            statut = "Litigieux"
+        else:
+            statut = "En attente"
 
-            if montant_paye_effectif >= montant_total:
-                statut = "En règle"
-            elif montant_paye_effectif > 0:
-                statut = "Litigieux"
-            else:
-                statut = "En attente"
+        # Mettre à jour le paiement
+        cursor.execute(
+            "UPDATE paiements SET locataire_id = %s, mois = %s, montant = %s, montant_total = %s, montant_paye = %s, reste_a_payer = %s, devise = %s, statut = %s, statut_souscription = %s, statut_paiement = %s WHERE id = %s",
+            (
+                new_locataire_id,
+                mois_date,
+                montant_souscrit,
+                montant_souscrit,
+                montant_paye_effectif,
+                reste_a_payer,
+                devise,
+                statut or "En attente",
+                statut_souscription or "Simple",
+                statut_paiement,
+                paiement_id,
+            ),
+        )
 
-            # Mettre à jour le paiement
-            cursor.execute(
-                "UPDATE paiements SET locataire_id = %s, mois = %s, montant = %s, montant_total = %s, montant_paye = %s, reste_a_payer = %s, devise = %s, statut = %s, statut_souscription = %s, statut_paiement = %s WHERE id = %s",
-                (
-                    new_locataire_id,
-                    mois_date,
-                    montant_souscrit,
-                    montant_souscrit,
-                    montant_paye_effectif,
-                    reste_a_payer,
-                    devise,
-                    statut or "En attente",
-                    statut_souscription or "Simple",
-                    statut_paiement,
-                    paiement_id,
-                ),
-            )
-
-            conn.commit()
-            return True, "Modification réussie avec succès !"
+        conn.commit()
+        return True, "Modification réussie avec succès !"
 
     except Error as e:
-        if "conn" in locals() and conn.is_connected():
+        if connexion_prete(locals().get("conn")):
             conn.rollback()
         return False, f"Erreur de base de données : {e}"
     finally:
-        if "conn" in locals() and conn.is_connected():
-            cursor.close()
-            conn.close()
+        if "cursor" in locals() and cursor is not None:
+            try:
+                cursor.close()
+            except Exception:
+                pass
+        if connexion_prete(locals().get("conn")):
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 def supprimer_souscription(
@@ -815,39 +849,47 @@ def supprimer_souscription(
     """Supprime une souscription."""
     try:
         conn = obtenir_connexion(connection_provider)
-        if conn.is_connected():
-            cursor = conn.cursor()
+        if not connexion_prete(conn):
+            return False, MESSAGE_BASE_INDISPONIBLE
+        cursor = conn.cursor()
 
-            # Vérifier si le paiement existe
-            cursor.execute(
-                "SELECT id FROM paiements WHERE id = %s",
-                (paiement_id,),
-            )
-            if not cursor.fetchone():
-                return False, f"Paiement avec ID {paiement_id} introuvable."
+        # Vérifier si le paiement existe
+        cursor.execute(
+            "SELECT id FROM paiements WHERE id = %s",
+            (paiement_id,),
+        )
+        if not cursor.fetchone():
+            return False, f"Paiement avec ID {paiement_id} introuvable."
 
-            # Supprimer le paiement
-            cursor.execute(
-                "DELETE FROM paiements WHERE id = %s",
-                (paiement_id,),
-            )
+        # Supprimer le paiement
+        cursor.execute(
+            "DELETE FROM paiements WHERE id = %s",
+            (paiement_id,),
+        )
 
-            affected_rows = cursor.rowcount
-            conn.commit()
+        affected_rows = cursor.rowcount
+        conn.commit()
 
-            if affected_rows > 0:
-                return True, "Suppression réussie avec succès !"
-            else:
-                return False, "Aucune ligne supprimée. Le paiement n'existe peut-être pas."
+        if affected_rows > 0:
+            return True, "Suppression réussie avec succès !"
+        else:
+            return False, "Aucune ligne supprimée. Le paiement n'existe peut-être pas."
 
     except Error as e:
-        if "conn" in locals() and conn.is_connected():
+        if connexion_prete(locals().get("conn")):
             conn.rollback()
         return False, f"Erreur de base de données : {e}"
     finally:
-        if "conn" in locals() and conn.is_connected():
-            cursor.close()
-            conn.close()
+        if "cursor" in locals() and cursor is not None:
+            try:
+                cursor.close()
+            except Exception:
+                pass
+        if connexion_prete(locals().get("conn")):
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 def ajouter_paiement_complementaire(
@@ -858,73 +900,173 @@ def ajouter_paiement_complementaire(
     """Ajoute un paiement complémentaire à un paiement existant."""
     try:
         conn = obtenir_connexion(connection_provider)
-        if conn.is_connected():
-            cursor = conn.cursor()
+        if not connexion_prete(conn):
+            return False, MESSAGE_BASE_INDISPONIBLE
+        cursor = conn.cursor()
 
-            # Récupérer les informations actuelles
-            cursor.execute(
-                "SELECT locataire_id, mois, statut_souscription, devise, montant_total, montant_paye "
-                "FROM paiements WHERE id = %s FOR UPDATE",
-                (paiement_id,),
+        # Récupérer les informations actuelles
+        cursor.execute(
+            "SELECT locataire_id, mois, statut_souscription, devise, montant_total, montant_paye "
+            "FROM paiements WHERE id = %s FOR UPDATE",
+            (paiement_id,),
+        )
+        result = cursor.fetchone()
+        if not result:
+            return False, "Paiement non trouvé."
+
+        locataire_id, mois, statut_souscription, devise, montant_total, montant_paye_actuel = result
+
+        if statut_souscription == "Spécial":
+            allocations = _allouer_versement_special(
+                cursor,
+                locataire_id,
+                mois,
+                montant_total,
+                devise,
+                montant_additionnel,
+                creer_mois_cible=False,
             )
-            result = cursor.fetchone()
-            if not result:
-                return False, "Paiement non trouvé."
-
-            locataire_id, mois, statut_souscription, devise, montant_total, montant_paye_actuel = result
-
-            if statut_souscription == "Spécial":
-                allocations = _allouer_versement_special(
-                    cursor,
-                    locataire_id,
-                    mois,
-                    montant_total,
-                    devise,
-                    montant_additionnel,
-                    creer_mois_cible=False,
-                )
-                conn.commit()
-                return True, _message_allocation_special(allocations)
-
-            # Calculer le nouveau montant payé
-            nouveau_montant_paye = float(montant_paye_actuel) + float(montant_additionnel)
-
-            # Calculer le nouveau reste à payer
-            nouveau_reste = max(0, float(montant_total) - nouveau_montant_paye)
-
-            # Déterminer le nouveau statut de paiement
-            if nouveau_montant_paye >= float(montant_total):
-                nouveau_statut_paiement = "Complet"
-            elif nouveau_montant_paye > 0:
-                nouveau_statut_paiement = "Partiel"
-            else:
-                nouveau_statut_paiement = "En attente"
-
-            # Déterminer le statut automatiquement selon le montant payé
-            if nouveau_montant_paye <= 0:
-                nouveau_statut = "En attente"
-            elif nouveau_montant_paye < float(montant_total):
-                nouveau_statut = "Litigieux"
-            else:
-                nouveau_statut = "En règle"
-
-            # Mettre à jour le paiement
-            cursor.execute(
-                "UPDATE paiements SET montant_paye = %s, reste_a_payer = %s, statut_paiement = %s, statut = %s WHERE id = %s",
-                (nouveau_montant_paye, nouveau_reste, nouveau_statut_paiement, nouveau_statut, paiement_id),
-            )
-
             conn.commit()
-            return True, f"Paiement complémentaire de {montant_additionnel} ajouté avec succès ! Nouveau montant payé : {nouveau_montant_paye}"
+            return True, _message_allocation_special(allocations)
+
+        # Calculer le nouveau montant payé
+        nouveau_montant_paye = float(montant_paye_actuel) + float(montant_additionnel)
+
+        # Calculer le nouveau reste à payer
+        nouveau_reste = max(0, float(montant_total) - nouveau_montant_paye)
+
+        # Déterminer le nouveau statut de paiement
+        if nouveau_montant_paye >= float(montant_total):
+            nouveau_statut_paiement = "Complet"
+        elif nouveau_montant_paye > 0:
+            nouveau_statut_paiement = "Partiel"
+        else:
+            nouveau_statut_paiement = "En attente"
+
+        # Déterminer le statut automatiquement selon le montant payé
+        if nouveau_montant_paye <= 0:
+            nouveau_statut = "En attente"
+        elif nouveau_montant_paye < float(montant_total):
+            nouveau_statut = "Litigieux"
+        else:
+            nouveau_statut = "En règle"
+
+        # Mettre à jour le paiement
+        cursor.execute(
+            "UPDATE paiements SET montant_paye = %s, reste_a_payer = %s, statut_paiement = %s, statut = %s WHERE id = %s",
+            (nouveau_montant_paye, nouveau_reste, nouveau_statut_paiement, nouveau_statut, paiement_id),
+        )
+
+        conn.commit()
+        return True, f"Paiement complémentaire de {montant_additionnel} ajouté avec succès ! Nouveau montant payé : {nouveau_montant_paye}"
 
     except (Error, ValueError) as e:
-        if "conn" in locals() and conn.is_connected():
+        if connexion_prete(locals().get("conn")):
             conn.rollback()
         return False, f"Erreur de base de données : {e}"
     finally:
-        if "conn" in locals() and conn.is_connected():
-            cursor.close()
-            conn.close()
+        if "cursor" in locals() and cursor is not None:
+            try:
+                cursor.close()
+            except Exception:
+                pass
+        if connexion_prete(locals().get("conn")):
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def _enregistrer_signature_legacy(
+    signature_payload: dict,
+    document_hash: str,
+    signature_png: bytes,
+    signer_ip: str,
+    user_agent: str,
+    connection_provider: ConnectionProvider | None = None,
+):
+    """Enregistre la signature et recalcule le statut du paiement en base."""
+    paiement_id = int(signature_payload.get("paiement_id") or 0)
+    locataire_id = int(signature_payload.get("locataire_id") or 0)
+    if paiement_id <= 0 or locataire_id <= 0:
+        return False, "Paiement ou locataire invalide."
+
+    try:
+        conn = obtenir_connexion(connection_provider)
+        if not connexion_prete(conn):
+            return False, MESSAGE_BASE_INDISPONIBLE
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT montant_total, montant_paye, reste_a_payer
+            FROM paiements
+            WHERE id = %s AND locataire_id = %s
+            FOR UPDATE
+            """,
+            (paiement_id, locataire_id),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return False, "Paiement non trouvé."
+
+        montant_total = float(row[0] or 0)
+        montant_paye = float(row[1] or 0)
+        reste_a_payer = max(0.0, float(row[2] or 0))
+
+        if reste_a_payer <= 0:
+            statut_paiement = "Complet"
+            statut = "En règle"
+        elif montant_paye > 0:
+            statut_paiement = "Partiel"
+            statut = "Litigieux"
+        else:
+            statut_paiement = "En attente"
+            statut = "En attente"
+
+        cursor.execute(
+            """
+            UPDATE paiements
+            SET statut = %s,
+                statut_paiement = %s
+            WHERE id = %s
+            """,
+            (statut, statut_paiement, paiement_id),
+        )
+        cursor.execute(
+            """
+            INSERT INTO signatures_paiements (
+                paiement_id, locataire_id, document_hash, consentement,
+                signature_png, signataire_nom, signer_ip, user_agent
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                paiement_id,
+                locataire_id,
+                document_hash,
+                1,
+                signature_png,
+                str(signature_payload.get("signataire_nom", ""))[:201],
+                signer_ip[:45],
+                user_agent[:255],
+            ),
+        )
+        conn.commit()
+        return True, f"Signature enregistrée. Statut final : {statut}"
+    except (Error, ValueError) as e:
+        if connexion_prete(locals().get("conn")):
+            conn.rollback()
+        return False, f"Erreur de base de données : {e}"
+    finally:
+        if "cursor" in locals() and cursor is not None:
+            try:
+                cursor.close()
+            except Exception:
+                pass
+        if connexion_prete(locals().get("conn")):
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 def get_archives(
@@ -934,6 +1076,8 @@ def get_archives(
 ):
     try:
         conn = obtenir_connexion(connection_provider)
+        if not connexion_prete(conn):
+            return []
         cursor = conn.cursor()
 
         query = (
@@ -961,9 +1105,16 @@ def get_archives(
         _show_error(f"Impossible de charger les archives : {e}")
         return []
     finally:
-        if "conn" in locals() and conn.is_connected():
-            cursor.close()
-            conn.close()
+        if "cursor" in locals() and cursor is not None:
+            try:
+                cursor.close()
+            except Exception:
+                pass
+        if connexion_prete(locals().get("conn")):
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 def restaurer_archive(
@@ -973,28 +1124,67 @@ def restaurer_archive(
     """Restaure un paiement depuis les archives vers la table principale."""
     try:
         conn = obtenir_connexion(connection_provider)
-        if conn.is_connected():
-            cursor = conn.cursor()
+        if not connexion_prete(conn):
+            return False, MESSAGE_BASE_INDISPONIBLE
+        cursor = conn.cursor()
+        archive_id = int(archive_id)
 
-            # Copier depuis archives_paiements vers paiements
-            query_insert = "INSERT IGNORE INTO paiements SELECT * FROM archives_paiements WHERE id = %s"
-            cursor.execute(query_insert, (archive_id,))
-            
-            # Supprimer de archives_paiements
-            query_delete = "DELETE FROM archives_paiements WHERE id = %s"
-            cursor.execute(query_delete, (archive_id,))
+        # Ne jamais écraser un paiement actif: cela empêcherait la
+        # restauration de rester réversible et pourrait faire perdre
+        # l'enregistrement archivé.
+        cursor.execute(
+            "SELECT 1 FROM paiements WHERE id = %s LIMIT 1",
+            (archive_id,),
+        )
+        if cursor.fetchone():
+            return False, (
+                f"Le paiement actif {archive_id} existe déjà. "
+                "Restauration annulée pour éviter un doublon."
+            )
 
-            conn.commit()
-            return True, "Archive restaurée avec succès !"
+        cursor.execute(
+            "SELECT 1 FROM archives_paiements WHERE id = %s LIMIT 1",
+            (archive_id,),
+        )
+        if not cursor.fetchone():
+            return False, f"Archive {archive_id} introuvable."
+
+        # Copier depuis archives_paiements vers paiements
+        cursor.execute(
+            "INSERT INTO paiements SELECT * FROM archives_paiements WHERE id = %s",
+            (archive_id,),
+        )
+        if cursor.rowcount <= 0:
+            conn.rollback()
+            return False, "Impossible de restaurer l'archive."
+        
+        # Supprimer de archives_paiements
+        cursor.execute(
+            "DELETE FROM archives_paiements WHERE id = %s",
+            (archive_id,),
+        )
+        if cursor.rowcount <= 0:
+            conn.rollback()
+            return False, "L'archive a été copiée mais la suppression a échoué."
+
+        conn.commit()
+        return True, "Archive restaurée avec succès !"
 
     except Error as e:
-        if "conn" in locals() and conn.is_connected():
+        if connexion_prete(locals().get("conn")):
             conn.rollback()
         return False, f"Erreur de restauration de l'archive : {e}"
     finally:
-        if "conn" in locals() and conn.is_connected():
-            cursor.close()
-            conn.close()
+        if "cursor" in locals() and cursor is not None:
+            try:
+                cursor.close()
+            except Exception:
+                pass
+        if connexion_prete(locals().get("conn")):
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 def update_payment_details_after_signature(
@@ -1010,6 +1200,8 @@ def update_payment_details_after_signature(
     """
     try:
         conn = obtenir_connexion(connection_provider)
+        if not connexion_prete(conn):
+            return False, MESSAGE_BASE_INDISPONIBLE
         cursor = conn.cursor()
 
         # Récupérer le montant_paye actuel pour ce paiement
@@ -1056,13 +1248,20 @@ def update_payment_details_after_signature(
         return True, "Paiement mis à jour avec succès après signature."
 
     except (Error, ValueError) as e:
-        if "conn" in locals() and conn.is_connected():
+        if connexion_prete(locals().get("conn")):
             conn.rollback()
         return False, f"Erreur de base de données lors de la mise à jour du paiement: {e}"
     finally:
-        if "conn" in locals() and conn.is_connected():
-            cursor.close()
-            conn.close()
+        if "cursor" in locals() and cursor is not None:
+            try:
+                cursor.close()
+            except Exception:
+                pass
+        if connexion_prete(locals().get("conn")):
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 def enregistrer_signature_et_mettre_a_jour_paiement(
@@ -1077,6 +1276,8 @@ def enregistrer_signature_et_mettre_a_jour_paiement(
     cursor = None
     try:
         conn = obtenir_connexion()
+        if not connexion_prete(conn):
+            return False, MESSAGE_BASE_INDISPONIBLE
         cursor = conn.cursor()
         paiement_id = int(payload["paiement_id"])
         montant_total = _decimal_amount(payload.get("montant_total", 0))
@@ -1131,11 +1332,11 @@ def enregistrer_signature_et_mettre_a_jour_paiement(
         conn.commit()
         return True, "Signature et paiement enregistrés."
     except (Error, ValueError) as exc:
-        if conn is not None and conn.is_connected():
+        if connexion_prete(conn):
             conn.rollback()
         return False, f"Erreur transactionnelle de signature : {exc}"
     finally:
         if cursor is not None:
             cursor.close()
-        if conn is not None and conn.is_connected():
+        if connexion_prete(conn):
             conn.close()

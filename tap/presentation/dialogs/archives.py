@@ -3,6 +3,7 @@ from tkinter import ttk, messagebox, filedialog
 import customtkinter as ctk
 
 from tap.config.theme import C
+from tap.core.archiver import executer_archivage
 from tap.infrastructure.database.repository import get_archives, restaurer_archive
 from tap.presentation.dialogs.export_pdf import ExportPDFDialog
 
@@ -10,6 +11,7 @@ from tap.presentation.dialogs.export_pdf import ExportPDFDialog
 class DialogArchives(ctk.CTkToplevel):
     def __init__(self, master):
         super().__init__(master)
+        self._closed = False
         self.title("Archives des Mois Passés")
         self.geometry("900x600")
         self.minsize(800, 500)
@@ -50,6 +52,16 @@ class DialogArchives(ctk.CTkToplevel):
             self.filters_frame, text="Actualiser", command=self.load_data, width=100
         )
         self.btn_refresh.pack(side="left", padx=10, pady=10)
+
+        self.btn_archiver = ctk.CTkButton(
+            self.filters_frame,
+            text="Archiver maintenant",
+            command=self.archiver_maintenant,
+            width=150,
+            fg_color=C["orange"],
+            hover_color=C["orange"],
+        )
+        self.btn_archiver.pack(side="left", padx=10, pady=10)
 
         # Table
         self.table_frame = ctk.CTkFrame(self)
@@ -92,8 +104,8 @@ class DialogArchives(ctk.CTkToplevel):
             self.footer_frame, 
             text="📄 Exporter PDF", 
             command=self.export_pdf,
-            fg_color=C.SECONDARY,
-            hover_color=C.SECONDARY_HOVER
+            fg_color=C["bg_section"],
+            hover_color=C["border"]
         )
         self.btn_export_pdf.pack(side="left", padx=(0, 10))
 
@@ -101,8 +113,8 @@ class DialogArchives(ctk.CTkToplevel):
             self.footer_frame, 
             text="📊 Exporter CSV", 
             command=self.export_csv,
-            fg_color=C.SUCCESS,
-            hover_color=C.SUCCESS_HOVER
+            fg_color=C["green"],
+            hover_color=C["green"]
         )
         self.btn_export_csv.pack(side="left", padx=10)
 
@@ -110,8 +122,8 @@ class DialogArchives(ctk.CTkToplevel):
             self.footer_frame, 
             text="🔄 Restaurer Sélection", 
             command=self.restaurer_selection,
-            fg_color=C.WARNING,
-            hover_color=C.WARNING_HOVER
+            fg_color=C["orange"],
+            hover_color=C["orange"]
         )
         self.btn_restaurer.pack(side="right")
 
@@ -124,7 +136,15 @@ class DialogArchives(ctk.CTkToplevel):
         nom = self.entry_search.get().strip()
         mois = self.entry_mois.get().strip()
 
-        records = get_archives(filtre_nom=nom, filtre_mois=mois)
+        try:
+            records = get_archives(filtre_nom=nom, filtre_mois=mois)
+        except Exception as exc:
+            messagebox.showerror(
+                "Archives indisponibles",
+                f"Impossible de charger les archives : {exc}",
+                parent=self,
+            )
+            records = []
         self.current_data = records
 
         for item in self.tree.get_children():
@@ -167,7 +187,54 @@ class DialogArchives(ctk.CTkToplevel):
         self.load_data()
         
         # Notifier la fenêtre parente qu'elle doit se rafraîchir
-        if hasattr(self.master, "load_data"):
+        if hasattr(self.master, "charger_donnees"):
+            self.master.charger_donnees()
+        elif hasattr(self.master, "load_data"):
+            self.master.load_data()
+
+    def archiver_maintenant(self):
+        if not messagebox.askyesno(
+            "Archivage",
+            "Voulez-vous archiver maintenant les paiements anciens ?\n\n"
+            "Les archives resteront consultables ici et pourront être restaurées.",
+            parent=self,
+        ):
+            return
+
+        try:
+            result = executer_archivage()
+        except Exception as exc:
+            messagebox.showerror(
+                "Archivage",
+                f"Impossible de lancer l'archivage automatique : {exc}",
+                parent=self,
+            )
+            return
+
+        if not result.get("enabled", True):
+            messagebox.showinfo(
+                "Archivage",
+                "L'archivage automatique est désactivé dans config.json.",
+                parent=self,
+            )
+            return
+
+        archived = int(result.get("archived", 0) or 0)
+        skipped = int(result.get("skipped", 0) or 0)
+        cutoff = result.get("cutoff") or "inconnu"
+        messagebox.showinfo(
+            "Archivage",
+            (
+                f"{archived} paiement(s) archivé(s).\n"
+                f"{skipped} ligne(s) conservée(s) ou déjà archivées.\n"
+                f"Seuil d'archivage : {cutoff}."
+            ),
+            parent=self,
+        )
+        self.load_data()
+        if hasattr(self.master, "charger_donnees"):
+            self.master.charger_donnees()
+        elif hasattr(self.master, "load_data"):
             self.master.load_data()
 
     def export_csv(self):
@@ -210,8 +277,25 @@ class DialogArchives(ctk.CTkToplevel):
             pdf_data.append((r[2], r[3], "", r[5], r[6], r[4], r[8]))
             
         filters = {"type": "Archives"}
-        ExportPDFDialog(self, pdf_data, filters, export_mode="pdf")
+        # Garder une référence pour éviter le garbage collection
+        self._export_pdf_dialog = ExportPDFDialog(self, pdf_data, filters, export_mode="pdf")
 
     def on_close(self):
-        self.grab_release()
-        self.destroy()
+        if getattr(self, '_closed', False):
+            return
+        self._closed = True
+        # Nettoyer la référence dans le parent si elle existe
+        try:
+            if hasattr(self.master, '_archives_dialog') and self.master._archives_dialog == self:
+                self.master._archives_dialog = None
+        except Exception:
+            pass
+        try:
+            self.grab_release()
+        except Exception:
+            pass
+        if self.winfo_exists():
+            try:
+                self.destroy()
+            except Exception:
+                pass

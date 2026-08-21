@@ -13,8 +13,8 @@
 ## Instructions rapides pour le client
 
 ### 1. Prérequis
-- XAMPP avec MySQL installé et démarré
-- Base de données `gestion_loyers` créée (voir INSTALLATION.md pour les scripts SQL)
+- XAMPP avec MySQL installé et démarré, ou un serveur MySQL réseau accessible
+- Base de données `gestion_loyers` créée et, si nécessaire, restaurée depuis une sauvegarde
 
 ### 2. Configuration
 1. Ouvrir le fichier `config.json`
@@ -51,7 +51,10 @@ Pour toute question, consulter le fichier `INSTALLATION.md` ou contacter le supp
 ## Notes importantes
 
 - L'application nécessite MySQL/XAMPP pour fonctionner
-- Les données sont stockées dans la base de données MySQL
+- Les données sont stockées dans la base de données MySQL, jamais dans l'EXE
+- `localhost` signifie une base différente sur chaque ordinateur. Pour partager
+  les mêmes enregistrements, renseigner l'adresse du serveur MySQL central
+- Pour transférer les données existantes, restaurer un export SQL de la base source
 - Sauvegardez régulièrement votre base de données
 - Le fichier `config.json` doit être dans le même dossier que l'exécutable
 

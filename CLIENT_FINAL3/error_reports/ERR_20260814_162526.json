@@ -1,0 +1,10 @@
+{
+  "error_id": "ERR_20260814_162526",
+  "timestamp": "2026-08-14T16:25:26.715521",
+  "error_type": "TclError",
+  "error_message": "Can't find a usable init.tcl in the following directories: \n    {C:\\Users\\IRFLM~1\\AppData\\Local\\Temp\\_MEI71122\\_tcl_data} C:/Users/IRFLM~1/AppData/Local/Temp/lib/tcl8.6 {E:/Amour Parfait/lib/tcl8.6} E:/lib/tcl8.6 {E:/Amour Parfait/library} E:/library E:/tcl8.6.15/library E:/tcl8.6.15/library\n\n\n\nThis probably means that Tcl wasn't installed properly.\n",
+  "traceback": "Traceback (most recent call last):\n  File \"tap\\presentation\\bootstrap.py\", line 59, in launch_app\n  File \"tap\\presentation\\dialogs\\login.py\", line 14, in __init__\n  File \"customtkinter\\windows\\ctk_tk.py\", line 38, in __init__\n  File \"C:\\Users\\IRFLM~1\\AppData\\Local\\Temp\\_MEI71122\\tkinter\\__init__.py\", line 2470, in __init__\n    self.tk = _tkinter.create(screenName, baseName, className, interactive, wantobjects, useTk, sync, use)\n              ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n_tkinter.TclError: Can't find a usable init.tcl in the following directories: \n    {C:\\Users\\IRFLM~1\\AppData\\Local\\Temp\\_MEI71122\\_tcl_data} C:/Users/IRFLM~1/AppData/Local/Temp/lib/tcl8.6 {E:/Amour Parfait/lib/tcl8.6} E:/lib/tcl8.6 {E:/Amour Parfait/library} E:/library E:/tcl8.6.15/library E:/tcl8.6.15/library\n\n\n\nThis probably means that Tcl wasn't installed properly.\n\n",
+  "context": {
+    "context": "app_startup"
+  }
+}

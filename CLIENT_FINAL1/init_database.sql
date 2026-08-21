@@ -1,12 +1,11 @@
 -- Script d'initialisation complet pour TAP Gestion des Loyers
 -- Version responsive + schéma compatible application
--- ATTENTION: ce script supprime l'ancienne base et la recrée à zéro.
+-- Script non destructif : il ne supprime pas une base existante.
 
 SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;
 
-DROP DATABASE IF EXISTS gestion_loyers;
-CREATE DATABASE gestion_loyers
+CREATE DATABASE IF NOT EXISTS gestion_loyers
     CHARACTER SET utf8mb4
     COLLATE utf8mb4_unicode_ci;
 
@@ -15,7 +14,7 @@ USE gestion_loyers;
 SET FOREIGN_KEY_CHECKS = 1;
 
 -- Table des locataires
-CREATE TABLE locataires (
+CREATE TABLE IF NOT EXISTS locataires (
     id INT AUTO_INCREMENT PRIMARY KEY,
     nom VARCHAR(100) NOT NULL,
     prenom VARCHAR(100) NOT NULL,
@@ -27,7 +26,7 @@ CREATE TABLE locataires (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Table des paiements
-CREATE TABLE paiements (
+CREATE TABLE IF NOT EXISTS paiements (
     id INT AUTO_INCREMENT PRIMARY KEY,
     locataire_id INT NOT NULL,
     mois DATE NOT NULL,
@@ -52,7 +51,7 @@ CREATE TABLE paiements (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Journal des maintenances automatiques
-CREATE TABLE maintenance_journal (
+CREATE TABLE IF NOT EXISTS maintenance_journal (
     id INT AUTO_INCREMENT PRIMARY KEY,
     operation_key VARCHAR(64) NOT NULL,
     period_key VARCHAR(16) NOT NULL,

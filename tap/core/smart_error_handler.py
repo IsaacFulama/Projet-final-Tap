@@ -309,7 +309,7 @@ class SmartErrorHandler:
             try:
                 if ',' in current_value:
                     base_tooltip += " | Suggestion: Utilisez un point (.) au lieu de la virgule"
-            except:
+            except (AttributeError, TypeError):
                 pass
         
         return base_tooltip

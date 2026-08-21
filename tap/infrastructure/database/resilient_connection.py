@@ -17,6 +17,7 @@ from mysql.connector import Error, MySQLConnection
 from mysql.connector.pooling import PooledMySQLConnection
 
 from tap.infrastructure.database.connection import MySQLConnectionProvider
+from tap.config.settings import load_db_config
 
 _base_provider = MySQLConnectionProvider()
 logger = logging.getLogger(__name__)
@@ -100,11 +101,7 @@ class ResilientConnection:
     def _create_database_if_not_exists(self):
         """Crée la base de données si elle n'existe pas."""
         try:
-            import json
-            with open("config.json", "r") as f:
-                config = json.load(f)
-            
-            db_config = config.get("database", {})
+            db_config = load_db_config()
             db_name = db_config.get("database", "gestion_loyers")
             
             # Connexion sans spécifier la base de données
@@ -113,10 +110,12 @@ class ResilientConnection:
                 host=db_config.get("host", "localhost"),
                 user=db_config.get("user", "root"),
                 password=db_config.get("password", ""),
+                port=db_config.get("port", 3306),
             )
-            
+
             cursor = conn.cursor()
-            cursor.execute(f"CREATE DATABASE IF NOT EXISTS {db_name}")
+            safe_name = str(db_name).replace("`", "``")
+            cursor.execute(f"CREATE DATABASE IF NOT EXISTS `{safe_name}`")
             conn.commit()
             cursor.close()
             conn.close()

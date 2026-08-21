@@ -342,4 +342,8 @@ class SignatureQRDialog(ctk.CTkToplevel):
             except Exception:
                 logger.debug("Impossible d'annuler le polling de signature en cours", exc_info=True)
             self._poll_id = None
+        # Nettoyer la référence dans le parent si elle existe
+        if hasattr(self.master, '_signature_qr_dialog') and self.master._signature_qr_dialog == self:
+            self.master._signature_qr_dialog = None
+        self.grab_release()
         self.destroy()

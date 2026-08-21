@@ -15,7 +15,7 @@ from typing import Tuple, List, Optional
 
 from tap.config.settings import load_app_config
 from tap.core.date_utils import SPECIAL_ROLLOVER_START, format_mois_affichage
-from tap.infrastructure.database import obtenir_connexion
+from tap.infrastructure.database.connection import connexion_prete, obtenir_connexion
 
 # Configuration du logging
 logging.basicConfig(
@@ -146,7 +146,7 @@ def _get_litigieux_paiements(reference_date: Optional[date] = None) -> List[dict
 
     try:
         conn = obtenir_connexion()
-        if conn.is_connected():
+        if connexion_prete(conn):
             cursor = conn.cursor()
             cursor.execute(
                 """
@@ -176,7 +176,7 @@ def _get_litigieux_paiements(reference_date: Optional[date] = None) -> List[dict
     finally:
         if cursor:
             cursor.close()
-        if conn and conn.is_connected():
+        if connexion_prete(conn):
             conn.close()
 
     return paiements
@@ -220,7 +220,7 @@ def verifier_rappel_litigieux(reference_date: Optional[date] = None) -> dict:
 
     try:
         conn = obtenir_connexion()
-        if conn.is_connected():
+        if connexion_prete(conn):
             cursor = conn.cursor()
             _ensure_database_schema(cursor)
             conn.commit()
@@ -311,7 +311,7 @@ def verifier_rappel_litigieux(reference_date: Optional[date] = None) -> dict:
     finally:
         if cursor:
             cursor.close()
-        if conn and conn.is_connected():
+        if connexion_prete(conn):
             conn.close()
 
     return {
@@ -345,7 +345,7 @@ def verifier_et_mettre_a_jour_statuts(reference_date: Optional[date] = None) -> 
     
     try:
         conn = obtenir_connexion()
-        if conn.is_connected():
+        if connexion_prete(conn):
             cursor = conn.cursor()
             
             # Date de référence
@@ -435,7 +435,7 @@ def verifier_et_mettre_a_jour_statuts(reference_date: Optional[date] = None) -> 
     finally:
         if cursor:
             cursor.close()
-        if conn and conn.is_connected():
+        if connexion_prete(conn):
             conn.close()
     
     return mis_a_jour, erreurs
@@ -465,7 +465,7 @@ def creer_souscriptions_speciales_mensuelles(reference_date: Optional[date] = No
 
     try:
         conn = obtenir_connexion()
-        if conn.is_connected():
+        if connexion_prete(conn):
             cursor = conn.cursor()
             _ensure_database_schema(cursor)
             conn.commit()
@@ -733,7 +733,7 @@ def creer_souscriptions_speciales_mensuelles(reference_date: Optional[date] = No
         statut_execution = "error"
         message = f"Échec de la migration mensuelle pour {periode}: {e}"
         try:
-            if conn and conn.is_connected():
+            if connexion_prete(conn):
                 cursor = conn.cursor()
                 _ensure_maintenance_journal(cursor)
                 cursor.execute(
@@ -764,7 +764,7 @@ def creer_souscriptions_speciales_mensuelles(reference_date: Optional[date] = No
     finally:
         if cursor:
             cursor.close()
-        if conn and conn.is_connected():
+        if connexion_prete(conn):
             conn.close()
 
     return {
@@ -796,7 +796,7 @@ def obtenir_paiements_a_suivi(reference_date: Optional[date] = None) -> List[dic
     
     try:
         conn = obtenir_connexion()
-        if conn.is_connected():
+        if connexion_prete(conn):
             cursor = conn.cursor()
             
             query = """
@@ -830,7 +830,7 @@ def obtenir_paiements_a_suivi(reference_date: Optional[date] = None) -> List[dic
     finally:
         if cursor:
             cursor.close()
-        if conn and conn.is_connected():
+        if connexion_prete(conn):
             conn.close()
     
     return paiements
@@ -863,6 +863,8 @@ def creer_loyers_recurrents_mensuels(reference_date: Optional[date] = None) -> d
     errors = 0
     try:
         conn = obtenir_connexion()
+        if not connexion_prete(conn):
+            return {"status": "error", "created": 0, "errors": 1, "message": "Base de données inaccessible."}
         cursor = conn.cursor()
         placeholders = ", ".join(["%s"] * len(statuts))
         cursor.execute(
@@ -914,14 +916,14 @@ def creer_loyers_recurrents_mensuels(reference_date: Optional[date] = None) -> d
         conn.commit()
         return {"status": "done", "month": periode, "created": created, "errors": errors}
     except Exception as exc:
-        if conn and conn.is_connected():
+        if connexion_prete(conn):
             conn.rollback()
         logger.error("Erreur lors de la reconduction des loyers: %s", exc)
         return {"status": "error", "month": periode, "created": created, "errors": errors + 1, "message": str(exc)}
     finally:
         if cursor:
             cursor.close()
-        if conn and conn.is_connected():
+        if connexion_prete(conn):
             conn.close()
 
 

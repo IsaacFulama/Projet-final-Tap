@@ -123,14 +123,26 @@ class HistoryPayment:
     @classmethod
     def from_row(cls, row: Sequence[Any]) -> "HistoryPayment":
         amount = row[1] if len(row) > 1 else 0
+        total_amount = row[5] if len(row) > 5 and row[5] is not None else amount
+        paid_amount = row[6] if len(row) > 6 and row[6] is not None else 0
+        if len(row) > 7 and row[7] is not None:
+            remaining_amount = row[7]
+        else:
+            try:
+                remaining_amount = max(
+                    0,
+                    float(total_amount or 0) - float(paid_amount or 0),
+                )
+            except (TypeError, ValueError):
+                remaining_amount = 0
         return cls(
             month=row[0] if len(row) > 0 else "",
             amount=amount,
             currency=str(row[2] or "") if len(row) > 2 else "",
             subscription_status=str(row[3] or "Simple") if len(row) > 3 else "Simple",
             status=str(row[4] or "En attente") if len(row) > 4 else "En attente",
-            total_amount=row[5] if len(row) > 5 else amount,
-            paid_amount=row[6] if len(row) > 6 else amount,
-            remaining_amount=row[7] if len(row) > 7 else 0,
-            payment_status=str(row[8] or "Complet") if len(row) > 8 else "Complet",
+            total_amount=total_amount,
+            paid_amount=paid_amount,
+            remaining_amount=remaining_amount,
+            payment_status=str(row[8] or "En attente") if len(row) > 8 else "En attente",
         )

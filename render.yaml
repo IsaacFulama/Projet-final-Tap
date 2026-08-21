@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: tap-gestion-portail
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile.portal
+    healthCheckPath: /api/mobile/health
+    autoDeploy: false
+    envVars:
+      - key: TAP_MOBILE_HOST
+        value: 0.0.0.0
+      - key: TAP_MOBILE_PORT
+        value: 10000
+      - key: DB_PORT
+        value: 3306
+      - key: DB_HOST
+        sync: false
+      - key: DB_NAME
+        sync: false
+      - key: DB_USER
+        sync: false
+      - key: DB_PASS
+        sync: false
+      - key: TAP_PORTAL_TOKEN_PEPPER
+        sync: false
+      - key: TAP_MOBILE_API_KEY
+        sync: false

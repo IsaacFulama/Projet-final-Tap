@@ -10,8 +10,8 @@
     "enabled": true,
     "recipients": ["+243852382067"],
     "check_internet": true,
-  "send_monthly_pdf": true,
-  "report_types": ["en_regle", "litigieux"]
+    "send_monthly_pdf": true,
+    "report_types": ["en_regle", "litigieux"]
   },
   "overdue_reminders": {
     "enabled": true,
@@ -20,11 +20,37 @@
   },
   "automatic_maintenance": {
     "update_day": 7,
+    "special_rollover_enabled": false,
     "renew_recurring_rents": true,
     "renewal_statuses": ["Simple", "Spécial"]
   },
+  "mobile_portal": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 8765,
+    "public_host": ""
+  },
+  "archiving": {
+    "enabled": true,
+    "months": 24,
+    "only_paid": true,
+    "batch_size": 500
+  },
   "monthly_report": {
-    "email": {"enabled": false, "host": "smtp.example.com", "port": 587, "starttls": true, "username": "", "password": "", "from": "", "recipients": []},
-    "whatsapp": {"enabled": false, "mode": "disabled", "recipient": ""}
+    "email": {
+      "enabled": false,
+      "host": "smtp.example.com",
+      "port": 587,
+      "starttls": true,
+      "username": "",
+      "password": "",
+      "from": "",
+      "recipients": []
+    },
+    "whatsapp": {
+      "enabled": false,
+      "mode": "disabled",
+      "recipient": ""
+    }
   }
 }

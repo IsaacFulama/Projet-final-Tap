@@ -1,13 +1,89 @@
 from datetime import date
 
 import customtkinter as ctk
-from tkinter import messagebox
+from tkinter import messagebox, _tkinter
 
 from tap.config.theme import C
 from tap.config.responsive import clamp_window_geometry, detect_screen_profile
 from tap.core.date_utils import build_month_choices, format_month_choice, format_month_label, month_name_fr, parse_mois_saisie
 from tap.core.validators import ValidationError, validate_name, validate_phone, validate_amount
 from tap.infrastructure.database import inserer_souscription, modifier_souscription
+
+
+def _assurer_root_disponible(toplevel):
+    """
+    Enregistre explicitement le root Tk comme default_root AVANT de construire des widgets.
+    Corrige : RuntimeError("Too early to use font: no default root window")
+    qui survient sur les 2èmes+ ouvertures de CTkToplevel après destruction d'anciens dialogues.
+    """
+    try:
+        import tkinter
+        # Récupérer le root via winfo_toplevel() du master
+        master = getattr(toplevel, 'master', None)
+        root = None
+        if master is not None:
+            try:
+                root = master.winfo_toplevel()
+                while hasattr(root, 'master') and root.master is not None:
+                    root = root.master
+            except Exception:
+                pass
+        if root is None or not getattr(root, 'winfo_exists', lambda: False)():
+            try:
+                root = tkinter._default_root
+            except Exception:
+                root = None
+        # Enregistrer explicitement
+        if root is not None:
+            try:
+                tkinter._default_root = root
+            except Exception:
+                pass
+        # Accrochage: appeler une opération qui initialise le FontManager sans exception
+        try:
+            # Appel sûr qui force la résolution root sans créer de CTkFont
+            if hasattr(root, 'tk') and root.tk is not None:
+                root.tk.call('tk', 'useinputmethods', '1')
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
+def _annuler_after_callbacks(widget):
+    """
+    Annule TOUS les callbacks after enregistrés sur un widget et ses enfants.
+    Corrige : "invalid command name \"xxxxupdate\" / \"xxxcheck_dpi_scaling\""
+    qui surviennent quand customtkinter interne relance after sur widgets détruits.
+    """
+    try:
+        if not getattr(widget, 'winfo_exists', lambda: False)():
+            return
+        children = widget.winfo_children()
+    except Exception:
+        return
+    for child in children:
+        _annuler_after_callbacks(child)
+    try:
+        info = widget.tk.call('after', 'info')
+    except Exception:
+        info = []
+    if info:
+        # after info retourne liste de tuples/id selon le contexte
+        ids = []
+        if isinstance(info, (list, tuple)):
+            for item in info:
+                if isinstance(item, str) and (item.startswith('after#') or item[0] in '0123456789'):
+                    ids.append(item)
+                elif isinstance(item, (list, tuple)) and len(item) >= 1:
+                    candidate = item[0]
+                    if isinstance(candidate, str):
+                        ids.append(candidate)
+        for after_id in ids:
+            try:
+                widget.after_cancel(after_id)
+            except Exception:
+                pass
 
 
 def _appeler_callback(callback, details=None):
@@ -145,26 +221,136 @@ class NouveauSouscripteurDialog(ctk.CTkToplevel):
 
     def __init__(self, parent, callback_maj_tableau):
         super().__init__(parent)
+        self._closed = False
         self.callback_maj_tableau = callback_maj_tableau
         self._screen = detect_screen_profile()
         self._compact_mode = self._screen.width < 1100
         self._cycle_reference = date.today().replace(day=1)
+        self._show_after_id = None
+        self._focus_after_id = None
+        self._render_done = False
 
         self.title("TAP · Nouveau Souscripteur")
-        self._set_initial_geometry()
+        self.configure(fg_color=C['bg_deep'])
         self.resizable(True, True)
+
+        self.transient(parent)
+        self.grab_set()
+        self.protocol('WM_DELETE_WINDOW', self._close_dialog)
+        self.bind('<Escape>', lambda _: self._close_dialog())
+
+        # PRÉ-REQUIS OBLIGATOIRE : assurer le root Tk AVANT CTkFont / _build_ui()
+        # Sans ça → RuntimeError: Too early to use font: no default root window
+        # (sur les 2èmes ouvertures après destruction dialogue précédent)
+        _assurer_root_disponible(self)
+
+        # RENDU ROBUSTE : on cache la fenêtre SANS withdraw() pour garder le mapping
+        # Avecdraw() + wait_visibility() casse le pipeline de rendu Tk sur les 2e ouvertures
+        try:
+            self.attributes('-alpha', 0.0)
+        except Exception:
+            pass
+
+        self._build_ui()
+        self.update_idletasks()
+        self._set_initial_geometry()
         self.minsize(
             max(380, min(560, self._screen.width - 20)),
             max(400, min(520, self._screen.height - 20)),
         )
-        self.configure(fg_color=C['bg_deep'])
+        self.update_idletasks()
 
-        self.transient(parent)
-        self.grab_set()
-        self.bind('<Escape>', lambda _: self.destroy())
+        # Forcer le rendu de tous les widgets enfants
+        try:
+            self.update()
+        except Exception:
+            pass
 
-        self._build_ui()
-        self.after(120, self.field_nom.focus)
+        self._render_done = True
+
+        # Affichage différé court : la fenêtre est mappée mais invisible
+        # Cela garantit que winfo_children() et les géométries sont calculées
+        self._show_after_id = self.after(30, self._show_dialog)
+        self._focus_after_id = self.after(120, self._focus_first_field)
+
+    def _show_dialog(self):
+        self._show_after_id = None
+        if getattr(self, '_closed', False):
+            return
+        if not self.winfo_exists():
+            return
+        try:
+            self.attributes('-alpha', 1.0)
+        except Exception:
+            try:
+                if self.state() == 'withdrawn':
+                    self.deiconify()
+            except Exception:
+                pass
+        try:
+            self.lift()
+        except Exception:
+            pass
+        try:
+            self.focus_force()
+        except Exception:
+            pass
+        # Double mise à jour : garantit l'affichage des frames enfants
+        try:
+            self.update_idletasks()
+            self.update()
+        except Exception:
+            pass
+
+    def _focus_first_field(self):
+        self._focus_after_id = None
+        if getattr(self, '_closed', False):
+            return
+        if not self.winfo_exists():
+            return
+        try:
+            if hasattr(self, 'field_nom') and self.field_nom.winfo_exists():
+                self.field_nom.focus()
+        except Exception:
+            pass
+
+    def _close_dialog(self):
+        if getattr(self, '_closed', False):
+            return
+        self._closed = True
+        if getattr(self, '_show_after_id', None) is not None:
+            try:
+                self.after_cancel(self._show_after_id)
+            except Exception:
+                pass
+            self._show_after_id = None
+        if getattr(self, '_focus_after_id', None) is not None:
+            try:
+                self.after_cancel(self._focus_after_id)
+            except Exception:
+                pass
+            self._focus_after_id = None
+        try:
+            self.grab_release()
+        except Exception:
+            pass
+        # ANNULATION AFTER CALLBACKS INTERNES CTK (update/check_dpi_scaling)
+        # Corrige "invalid command name xxxupdate" après destroy
+        try:
+            _annuler_after_callbacks(self)
+        except Exception:
+            pass
+        # Nettoyer la référence dans le parent si elle existe
+        try:
+            if hasattr(self.master, '_current_dialog') and self.master._current_dialog == self:
+                self.master._current_dialog = None
+        except Exception:
+            pass
+        if self.winfo_exists():
+            try:
+                self.destroy()
+            except Exception:
+                pass
 
     def _set_initial_geometry(self):
         self.update_idletasks()
@@ -422,7 +608,7 @@ class NouveauSouscripteurDialog(ctk.CTkToplevel):
             border_width=1,
             text_color=C['text_lo'],
             hover_color=C['bg_section'],
-            command=self.destroy,
+            command=self._close_dialog,
         ).pack(side='top' if self._compact_mode else 'left', fill='x' if self._compact_mode else 'none', pady=(0, 8) if self._compact_mode else 0)
 
         self.btn_save = ctk.CTkButton(
@@ -532,7 +718,8 @@ class NouveauSouscripteurDialog(ctk.CTkToplevel):
 
         if success:
             messagebox.showinfo('Succès', message)
-            self.destroy()
+            # On ne nettoie pas la référence ici: _close_dialog() le gère de façon atomique
+            self._close_dialog()
             _appeler_callback(self.callback_maj_tableau, details)
         else:
             self.btn_save.configure(state='normal', text='  Créer  ')
@@ -544,38 +731,133 @@ class NouveauSouscripteurDialog(ctk.CTkToplevel):
 class FormulaireSouscription(ctk.CTkToplevel):
     def __init__(self, parent, callback_maj_tableau, paiement_id=None, donnees_initiales=None):
         super().__init__(parent)
+        self._closed = False
         self.callback_maj_tableau = callback_maj_tableau
         self.paiement_id = paiement_id
         self.mode_edition = paiement_id is not None
         self.donnees_initiales = donnees_initiales
         self._screen = detect_screen_profile()
         self._compact_mode = self._screen.width < 1100
+        self._show_after_id = None
+        self._focus_after_id = None
+        self._render_done = False
 
         title = 'TAP · Modifier Paiement' if self.mode_edition else 'TAP · Nouveau Paiement'
         self.title(title)
-        self._set_initial_geometry()
+        self.configure(fg_color=C['bg_deep'])
         self.resizable(True, True)
+
+        self.transient(parent)
+        self.grab_set()
+
+        self.protocol('WM_DELETE_WINDOW', self._close_dialog)
+        self.bind('<Escape>', lambda _: self._close_dialog())
+
+        # PRÉ-REQUIS OBLIGATOIRE : assurer le root Tk AVANT CTkFont / _build_ui()
+        _assurer_root_disponible(self)
+
+        # RENDU ROBUSTE : alpha 0.0 au lieu de withdraw() pour garder le mapping
+        try:
+            self.attributes('-alpha', 0.0)
+        except Exception:
+            pass
+
+        self._build_ui()
+
+        if self.mode_edition and self.donnees_initiales:
+            self._remplir_champs()
+
+        self.update_idletasks()
+        self._set_initial_geometry()
         self.minsize(
             max(380, min(560, self._screen.width - 20)),
             max(440, min(580, self._screen.height - 20)),
         )
-        self.configure(fg_color=C['bg_deep'])
+        self.update_idletasks()
+        try:
+            self.update()
+        except Exception:
+            pass
+        self._render_done = True
+        self._show_after_id = self.after(30, self._show_dialog)
+        self._focus_after_id = self.after(120, self._focus_first_field)
 
-        # Modalité correcte
-        self.transient(parent)
-        self.grab_set()
+    def _show_dialog(self):
+        self._show_after_id = None
+        if getattr(self, '_closed', False):
+            return
+        if not self.winfo_exists():
+            return
+        try:
+            self.attributes('-alpha', 1.0)
+        except Exception:
+            try:
+                if self.state() == 'withdrawn':
+                    self.deiconify()
+            except Exception:
+                pass
+        try:
+            self.lift()
+        except Exception:
+            pass
+        try:
+            self.focus_force()
+        except Exception:
+            pass
+        try:
+            self.update_idletasks()
+            self.update()
+        except Exception:
+            pass
 
-        # Fermeture clavier
-        self.bind('<Escape>', lambda _: self.destroy())
+    def _focus_first_field(self):
+        self._focus_after_id = None
+        if getattr(self, '_closed', False):
+            return
+        if not self.winfo_exists():
+            return
+        try:
+            if hasattr(self, 'field_nom') and self.field_nom.winfo_exists():
+                self.field_nom.focus()
+        except Exception:
+            pass
 
-        self._build_ui()
-
-        # Pré-remplir si mode édition
-        if self.mode_edition and self.donnees_initiales:
-            self._remplir_champs()
-
-        # Auto-focus sur le premier champ
-        self.after(120, self.field_nom.focus)
+    def _close_dialog(self):
+        if getattr(self, '_closed', False):
+            return
+        self._closed = True
+        if getattr(self, '_show_after_id', None) is not None:
+            try:
+                self.after_cancel(self._show_after_id)
+            except Exception:
+                pass
+            self._show_after_id = None
+        if getattr(self, '_focus_after_id', None) is not None:
+            try:
+                self.after_cancel(self._focus_after_id)
+            except Exception:
+                pass
+            self._focus_after_id = None
+        try:
+            self.grab_release()
+        except Exception:
+            pass
+        # ANNULATION AFTER CALLBACKS INTERNES CTK (update/check_dpi_scaling)
+        try:
+            _annuler_after_callbacks(self)
+        except Exception:
+            pass
+        # Nettoyer la référence dans le parent si elle existe
+        try:
+            if hasattr(self.master, '_current_dialog') and self.master._current_dialog == self:
+                self.master._current_dialog = None
+        except Exception:
+            pass
+        if self.winfo_exists():
+            try:
+                self.destroy()
+            except Exception:
+                pass
 
     def _set_initial_geometry(self):
         self.update_idletasks()
@@ -702,7 +984,6 @@ class FormulaireSouscription(ctk.CTkToplevel):
             month_controls,
             self.month_choices,
             current_choice,
-            320 if self._compact_mode else 360,
         )
         self.combo_mois.configure(command=lambda _: self._update_month_preview())
         self.combo_mois.pack(fill='x')
@@ -809,7 +1090,7 @@ class FormulaireSouscription(ctk.CTkToplevel):
                       border_color=C['border'], border_width=1,
                       text_color=C['text_lo'],
                       hover_color=C['bg_section'],
-                      command=self.destroy).pack(side='top' if self._compact_mode else 'left',
+                      command=self._close_dialog).pack(side='top' if self._compact_mode else 'left',
                                                 fill='x' if self._compact_mode else 'none',
                                                 pady=(0, 8) if self._compact_mode else 0)
 
@@ -970,7 +1251,8 @@ class FormulaireSouscription(ctk.CTkToplevel):
 
         if success:
             messagebox.showinfo('Succès', message)
-            self.destroy()
+            # On ne nettoie pas la référence ici: _close_dialog() le gère de façon atomique
+            self._close_dialog()
             if self.mode_edition:
                 self.callback_maj_tableau()
             else:

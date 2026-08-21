@@ -12,7 +12,7 @@ from typing import Any
 from fpdf import FPDF
 
 from tap.config.settings import load_app_config
-from tap.infrastructure.database.connection import ConnectionProvider, obtenir_connexion
+from tap.infrastructure.database.connection import ConnectionProvider, connexion_prete, obtenir_connexion
 
 
 def summarize_monthly_rows(rows: list[dict[str, Any]], month: str) -> dict[str, Any]:
@@ -37,6 +37,8 @@ def get_monthly_summary(
     """Récupère les paiements du mois et retourne les indicateurs financiers."""
     target_month = month or datetime.now().strftime("%Y-%m")
     conn = obtenir_connexion(connection_provider)
+    if not connexion_prete(conn):
+        return summarize_monthly_rows([], target_month)
     cursor = conn.cursor()
     try:
         cursor.execute(
@@ -54,7 +56,7 @@ def get_monthly_summary(
         return summarize_monthly_rows(rows, target_month)
     finally:
         cursor.close()
-        if conn.is_connected():
+        if connexion_prete(conn):
             conn.close()
 
 

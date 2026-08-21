@@ -27,6 +27,21 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+def _cancel_pending_after_callbacks(widget) -> None:
+    """Annule les callbacks Tk encore attaches avant destruction d'une fenetre."""
+    try:
+        callback_ids = widget.tk.call("after", "info")
+    except Exception:
+        return
+    if isinstance(callback_ids, str):
+        callback_ids = (callback_ids,)
+    for callback_id in callback_ids:
+        try:
+            widget.after_cancel(callback_id)
+        except Exception:
+            pass
+
 # Configuration de l'interface
 ctk.set_appearance_mode("Light")
 ctk.set_default_color_theme("blue")
@@ -62,6 +77,7 @@ def launch_app() -> None:
         # Si l'authentification a réussi, lancer l'application principale
         if login_dialog.authenticated:
             try:
+                _cancel_pending_after_callbacks(login_dialog)
                 login_dialog.destroy()
                 logger.info("Authentification réussie, lancement de l'application principale")
                 

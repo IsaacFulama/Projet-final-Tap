@@ -1,0 +1,10 @@
+{
+  "error_id": "ERR_20260818_105933",
+  "timestamp": "2026-08-18T10:59:33.286166",
+  "error_type": "TclError",
+  "error_message": "can't invoke \"destroy\" command: application has been destroyed",
+  "traceback": "Traceback (most recent call last):\n  File \"tap\\presentation\\bootstrap.py\", line 65, in launch_app\n  File \"customtkinter\\windows\\ctk_tk.py\", line 85, in destroy\n  File \"tkinter\\__init__.py\", line 2535, in destroy\n_tkinter.TclError: can't invoke \"destroy\" command: application has been destroyed\n",
+  "context": {
+    "context": "launch_main_app"
+  }
+}

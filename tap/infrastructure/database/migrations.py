@@ -5,14 +5,14 @@ import json
 from mysql.connector import Error
 
 from tap.core.date_utils import parse_mois_saisie
-from tap.infrastructure.database.connection import obtenir_connexion
+from tap.infrastructure.database.connection import connexion_prete, obtenir_connexion
 
 
 def initialiser_schema_si_absent():
     """Crée la base et les tables minimales si elles n'existent pas."""
     try:
         conn = obtenir_connexion()
-        if conn is None or not conn.is_connected():
+        if not connexion_prete(conn):
             return
 
         cursor = conn.cursor()
@@ -47,7 +47,7 @@ def initialiser_schema_si_absent():
                 statut_paiement VARCHAR(20) DEFAULT 'En attente',
                 CONSTRAINT fk_paiements_locataires
                     FOREIGN KEY (locataire_id) REFERENCES locataires(id)
-                    ON DELETE CASCADE,
+                    ON DELETE RESTRICT,
                 INDEX idx_statut (statut),
                 INDEX idx_statut_souscription (statut_souscription),
                 INDEX idx_mois (mois),
@@ -124,7 +124,7 @@ def initialiser_schema_si_absent():
     except Error as e:
         print(f"Erreur lors de l'initialisation du schéma: {e}")
     finally:
-        if "conn" in locals() and conn is not None and conn.is_connected():
+        if connexion_prete(locals().get("conn")):
             conn.close()
 
 
@@ -132,7 +132,7 @@ def ajouter_colonne_date_creation():
     """Ajoute date_creation aux tables qui l'utilisent."""
     try:
         conn = obtenir_connexion()
-        if conn.is_connected():
+        if connexion_prete(conn):
             cursor = conn.cursor()
 
             changed = False
@@ -153,7 +153,7 @@ def ajouter_colonne_date_creation():
     except Error as e:
         print(f"Erreur lors de l'ajout de la colonne: {e}")
     finally:
-        if "conn" in locals() and conn.is_connected():
+        if connexion_prete(locals().get("conn")):
             conn.close()
 
 
@@ -161,7 +161,7 @@ def ajouter_colonne_statut_souscription():
     """Ajoute la colonne statut_souscription si elle n'existe pas."""
     try:
         conn = obtenir_connexion()
-        if conn.is_connected():
+        if connexion_prete(conn):
             cursor = conn.cursor()
 
             cursor.execute("SHOW COLUMNS FROM paiements LIKE 'statut_souscription'")
@@ -183,7 +183,7 @@ def ajouter_colonne_statut_souscription():
     except Error as e:
         print(f"Erreur lors de l'ajout de la colonne statut_souscription: {e}")
     finally:
-        if "conn" in locals() and conn.is_connected():
+        if connexion_prete(locals().get("conn")):
             conn.close()
 
 
@@ -191,7 +191,7 @@ def migrer_mois_vers_date():
     """Convertit la colonne mois de VARCHAR vers DATE."""
     try:
         conn = obtenir_connexion()
-        if not conn.is_connected():
+        if not connexion_prete(conn):
             return
 
         cursor = conn.cursor()
@@ -229,7 +229,7 @@ def migrer_mois_vers_date():
     except Error as e:
         print(f"Erreur lors de la migration mois -> DATE: {e}")
     finally:
-        if "conn" in locals() and conn.is_connected():
+        if connexion_prete(locals().get("conn")):
             conn.close()
 
 
@@ -237,7 +237,7 @@ def renommer_statut_ordinaire_en_simple():
     """Remplace la valeur historique Ordinaire par Simple."""
     try:
         conn = obtenir_connexion()
-        if not conn.is_connected():
+        if not connexion_prete(conn):
             return
 
         cursor = conn.cursor()
@@ -263,7 +263,7 @@ def renommer_statut_ordinaire_en_simple():
     except Error as e:
         print(f"Erreur lors du renommage Ordinaire -> Simple: {e}")
     finally:
-        if "conn" in locals() and conn.is_connected():
+        if connexion_prete(locals().get("conn")):
             conn.close()
 
 
@@ -271,7 +271,7 @@ def renommer_statut_paye_en_en_regle():
     """Remplace la valeur de statut 'Payé' par 'En règle'."""
     try:
         conn = obtenir_connexion()
-        if not conn.is_connected():
+        if not connexion_prete(conn):
             return
 
         cursor = conn.cursor()
@@ -293,7 +293,7 @@ def renommer_statut_paye_en_en_regle():
     except Error as e:
         print(f"Erreur lors du renommage Payé -> En règle: {e}")
     finally:
-        if "conn" in locals() and conn.is_connected():
+        if connexion_prete(locals().get("conn")):
             conn.close()
 
 
@@ -301,7 +301,7 @@ def ajouter_colonnes_acompte():
     """Ajoute les colonnes pour la gestion des acomptes."""
     try:
         conn = obtenir_connexion()
-        if conn.is_connected():
+        if connexion_prete(conn):
             cursor = conn.cursor()
 
             # Vérifier et ajouter montant_total
@@ -368,7 +368,7 @@ def ajouter_colonnes_acompte():
     except Error as e:
         print(f"Erreur lors de l'ajout des colonnes acompte: {e}")
     finally:
-        if "conn" in locals() and conn.is_connected():
+        if connexion_prete(locals().get("conn")):
             conn.close()
 
 
@@ -376,7 +376,7 @@ def ajouter_index_locataire_mois_statut():
     """Ajoute un index composé utile aux vérifications mensuelles et aux contrôles d'existence."""
     try:
         conn = obtenir_connexion()
-        if conn.is_connected():
+        if connexion_prete(conn):
             cursor = conn.cursor()
 
             cursor.execute("SHOW INDEX FROM paiements WHERE Key_name = 'idx_locataire_mois_statut'")
@@ -394,7 +394,7 @@ def ajouter_index_locataire_mois_statut():
     except Error as e:
         print(f"Erreur lors de l'ajout de l'index locataire/mois/statut: {e}")
     finally:
-        if "conn" in locals() and conn.is_connected():
+        if connexion_prete(locals().get("conn")):
             conn.close()
 
 
@@ -402,7 +402,7 @@ def ajouter_table_maintenance_journal():
     """Crée la table de journalisation des maintenances automatiques."""
     try:
         conn = obtenir_connexion()
-        if conn.is_connected():
+        if connexion_prete(conn):
             cursor = conn.cursor()
             cursor.execute(
                 """
@@ -427,7 +427,7 @@ def ajouter_table_maintenance_journal():
     except Error as e:
         print(f"Erreur lors de la création de la table maintenance_journal: {e}")
     finally:
-        if "conn" in locals() and conn.is_connected():
+        if connexion_prete(locals().get("conn")):
             conn.close()
 
 
@@ -435,7 +435,7 @@ def ajouter_table_archives_paiements():
     """Crée la table archives_paiements pour stocker les vieux enregistrements."""
     try:
         conn = obtenir_connexion()
-        if conn.is_connected():
+        if connexion_prete(conn):
             cursor = conn.cursor()
             # On s'assure d'abord que la table n'existe pas déjà
             cursor.execute("SHOW TABLES LIKE 'archives_paiements'")
@@ -449,7 +449,59 @@ def ajouter_table_archives_paiements():
     except Error as e:
         print(f"Erreur lors de la création de la table archives_paiements: {e}")
     finally:
-        if "conn" in locals() and conn.is_connected():
+        if connexion_prete(locals().get("conn")):
+            conn.close()
+
+
+def ajouter_table_demandes_paiement():
+    """Crée les liens de paiement gratuits et leurs preuves de versement."""
+    conn = None
+    try:
+        conn = obtenir_connexion()
+        if connexion_prete(conn):
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS demandes_paiement (
+                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    paiement_id INT NOT NULL,
+                    token_hash VARCHAR(64) NOT NULL UNIQUE,
+                    montant_demande DECIMAL(10,2) NOT NULL,
+                    devise VARCHAR(10) NOT NULL,
+                    expires_at DATETIME NOT NULL,
+                    statut VARCHAR(24) NOT NULL DEFAULT 'pending',
+                    preuve_data MEDIUMBLOB NULL,
+                    preuve_mime VARCHAR(100) NULL,
+                    preuve_sha256 CHAR(64) NULL,
+                    verification_status VARCHAR(24) NOT NULL DEFAULT 'pending_review',
+                    note_locataire VARCHAR(500) NULL,
+                    cree_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    soumis_at DATETIME NULL,
+                    traite_at DATETIME NULL,
+                    note_traitement VARCHAR(500) NULL,
+                    CONSTRAINT fk_demande_paiement
+                        FOREIGN KEY (paiement_id) REFERENCES paiements(id)
+                        ON DELETE CASCADE,
+                    INDEX idx_demande_paiement (paiement_id),
+                    INDEX idx_demande_statut (statut),
+                    INDEX idx_demande_expiration (expires_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """
+            )
+            conn.commit()
+            for column, definition in (
+                ("preuve_sha256", "CHAR(64) NULL"),
+                ("verification_status", "VARCHAR(24) NOT NULL DEFAULT 'pending_review'"),
+            ):
+                cursor.execute("SHOW COLUMNS FROM demandes_paiement LIKE %s", (column,))
+                if not cursor.fetchone():
+                    cursor.execute(f"ALTER TABLE demandes_paiement ADD COLUMN {column} {definition}")
+            conn.commit()
+            cursor.close()
+    except Error as exc:
+        print(f"Erreur lors de la création des demandes de paiement: {exc}")
+    finally:
+        if connexion_prete(conn):
             conn.close()
 
 
@@ -457,7 +509,7 @@ def ajouter_table_loyer_tarifs():
     """Crée l'historique optionnel des tarifs applicables par locataire."""
     try:
         conn = obtenir_connexion()
-        if conn.is_connected():
+        if connexion_prete(conn):
             cursor = conn.cursor()
             cursor.execute(
                 """
@@ -479,7 +531,7 @@ def ajouter_table_loyer_tarifs():
     except Error as e:
         print(f"Erreur lors de la création de la table loyer_tarifs: {e}")
     finally:
-        if "conn" in locals() and conn.is_connected():
+        if connexion_prete(locals().get("conn")):
             conn.close()
 
 
@@ -487,7 +539,7 @@ def ajouter_table_signatures_paiements():
     """Crée la table des signatures numériques liées aux paiements."""
     try:
         conn = obtenir_connexion()
-        if conn.is_connected():
+        if connexion_prete(conn):
             cursor = conn.cursor()
             cursor.execute(
                 """
@@ -516,7 +568,7 @@ def ajouter_table_signatures_paiements():
     except Error as e:
         print(f"Erreur lors de la création de la table signatures_paiements: {e}")
     finally:
-        if "conn" in locals() and conn.is_connected():
+        if connexion_prete(locals().get("conn")):
             conn.close()
 
 
@@ -537,7 +589,7 @@ def verifier_coherence_donnees() -> dict[str, int]:
     cursor = None
     try:
         conn = obtenir_connexion()
-        if conn is None or not conn.is_connected():
+        if not connexion_prete(conn):
             return result
         cursor = conn.cursor()
         checks = {
@@ -577,7 +629,7 @@ def verifier_coherence_donnees() -> dict[str, int]:
     finally:
         if cursor is not None:
             cursor.close()
-        if conn is not None and conn.is_connected():
+        if connexion_prete(conn):
             conn.close()
 
 
@@ -591,7 +643,7 @@ def normaliser_restes_non_negatifs() -> None:
     cursor = None
     try:
         conn = obtenir_connexion()
-        if conn is None or not conn.is_connected():
+        if not connexion_prete(conn):
             return
         cursor = conn.cursor()
         cursor.execute(
@@ -603,13 +655,13 @@ def normaliser_restes_non_negatifs() -> None:
             print(f"{cursor.rowcount} reste(s) à payer négatif(s) normalisé(s)")
         conn.commit()
     except Error as exc:
-        if conn is not None and conn.is_connected():
+        if connexion_prete(conn):
             conn.rollback()
         print(f"Normalisation des restes impossible : {exc}")
     finally:
         if cursor is not None:
             cursor.close()
-        if conn is not None and conn.is_connected():
+        if connexion_prete(conn):
             conn.close()
 
 
@@ -619,7 +671,7 @@ def enregistrer_version_schema(version: str, name: str, payload: dict) -> None:
     cursor = None
     try:
         conn = obtenir_connexion()
-        if conn is None or not conn.is_connected():
+        if not connexion_prete(conn):
             return
         cursor = conn.cursor()
         checksum = hashlib.sha256(
@@ -636,7 +688,7 @@ def enregistrer_version_schema(version: str, name: str, payload: dict) -> None:
     finally:
         if cursor is not None:
             cursor.close()
-        if conn is not None and conn.is_connected():
+        if connexion_prete(conn):
             conn.close()
 
 
@@ -644,7 +696,7 @@ def ajouter_index_unique_locataire_nom_prenom():
     """Empêche les doublons de locataires au niveau MySQL."""
     try:
         conn = obtenir_connexion()
-        if conn.is_connected():
+        if connexion_prete(conn):
             cursor = conn.cursor()
             cursor.execute(
                 "SHOW INDEX FROM locataires WHERE Key_name = 'uq_locataire_nom_prenom'"
@@ -663,7 +715,7 @@ def ajouter_index_unique_locataire_nom_prenom():
         # l'application de démarrer : le contrôle applicatif reste actif.
         print(f"Contrainte unique locataire non ajoutée : {e}")
     finally:
-        if "conn" in locals() and conn.is_connected():
+        if connexion_prete(locals().get("conn")):
             conn.close()
 
 
@@ -680,6 +732,7 @@ def run_migrations():
     ajouter_index_unique_locataire_nom_prenom()
     ajouter_table_maintenance_journal()
     ajouter_table_archives_paiements()
+    ajouter_table_demandes_paiement()
     ajouter_table_loyer_tarifs()
     ajouter_table_signatures_paiements()
     coherence = verifier_coherence_donnees()

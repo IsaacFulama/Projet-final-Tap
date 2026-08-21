@@ -8,9 +8,9 @@ de base pour l'application TAP Gestion des Loyers.
 import logging
 
 from tap.infrastructure.database.connection import obtenir_connexion
-from tap.infrastructure.database.migrations import run_migrations
 from tap.infrastructure.database.repository import (
     ajouter_paiement_complementaire,
+    enregistrer_signature_et_mettre_a_jour_paiement,
     get_historique_locataire,
     get_souscriptions,
     get_souscriptions_avec_filtres,
@@ -23,13 +23,8 @@ from tap.infrastructure.database.repository import (
 
 logger = logging.getLogger(__name__)
 
-# Exécuter les migrations au démarrage avec gestion d'erreurs
-try:
-    run_migrations()
-    logger.info("Migrations de base de données exécutées avec succès")
-except Exception as e:
-    logger.warning(f"Impossible d'exécuter les migrations: {e}")
-    logger.warning("L'application continuera mais certaines fonctionnalités pourraient ne pas fonctionner correctement")
+# Les migrations sont lancées par ensure_startup_ready() au démarrage de l'UI.
+# Les exécuter ici à l'import provoquait des retries MySQL et des crashs None.
 
 __all__ = [
     "obtenir_connexion",
@@ -42,4 +37,5 @@ __all__ = [
     "modifier_souscription",
     "supprimer_souscription",
     "ajouter_paiement_complementaire",
+    "enregistrer_signature_et_mettre_a_jour_paiement",
 ]

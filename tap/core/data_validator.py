@@ -342,7 +342,7 @@ class DataValidator:
                             (cleaned_amount, paiement_id)
                         )
                         repair_report["repairs_made"] += 1
-                except:
+                except (ArithmeticError, TypeError, ValueError):
                     repair_report["errors_found"] += 1
                 
                 # Recalculer les champs dérivés

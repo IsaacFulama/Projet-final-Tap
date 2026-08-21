@@ -105,6 +105,30 @@ def test_get_souscriptions_handles_missing_connection(monkeypatch):
     assert result == []
 
 
+def test_get_historique_locataire_returns_rows_with_injected_connection():
+    rows = [("08/2026", Decimal("120.00"), "USD", "Spécial", "Litigieux", Decimal("120.00"), Decimal("0"), Decimal("120.00"), "En attente")]
+    fake_conn = FakeConnection(rows=rows)
+
+    result = repository.get_historique_locataire(52, connection_provider=lambda: fake_conn)
+
+    assert result == rows
+    assert fake_conn.closed is True
+    query, params = fake_conn.cursor_instance.executed[0]
+    assert "p.locataire_id = %s" in query
+    assert params == [52]
+
+
+def test_history_model_is_safe_with_legacy_five_column_row():
+    from tap.core.models import HistoryPayment
+
+    history = HistoryPayment.from_row(("08/2026", Decimal("120"), "USD", "Simple", "En attente"))
+
+    assert history.total_amount == Decimal("120")
+    assert history.paid_amount == 0
+    assert history.remaining_amount == 120
+    assert history.payment_status == "En attente"
+
+
 def test_initialiser_schema_si_absent_creates_missing_tables(monkeypatch):
     class FakeCursor:
         def __init__(self):
@@ -234,3 +258,92 @@ def test_repartir_versement_special_refuse_un_montant_sans_mois_disponible():
         assert "mois Spéciaux impayés disponibles" in str(exc)
     else:
         raise AssertionError("Un versement supérieur aux dettes doit être refusé")
+
+
+def test_restaurer_archive_refuses_to_overwrite_existing_active_payment(monkeypatch):
+    class RestoreCursor:
+        def __init__(self):
+            self.executed = []
+            self._fetchone_results = [(1,)]
+
+        def execute(self, query, params=None):
+            self.executed.append((query, list(params or [])))
+
+        def fetchone(self):
+            if self._fetchone_results:
+                return self._fetchone_results.pop(0)
+            return None
+
+        def close(self):
+            pass
+
+    class RestoreConnection:
+        def __init__(self):
+            self.cursor_instance = RestoreCursor()
+            self.closed = False
+
+        def is_connected(self):
+            return True
+
+        def cursor(self):
+            return self.cursor_instance
+
+        def commit(self):
+            pass
+
+        def rollback(self):
+            pass
+
+        def close(self):
+            self.closed = True
+
+    fake_conn = RestoreConnection()
+    monkeypatch.setattr(repository, "obtenir_connexion", lambda provider=None: fake_conn)
+
+    success, message = repository.restaurer_archive(12)
+
+    assert success is False
+    assert "existe déjà" in message
+    assert len(fake_conn.cursor_instance.executed) == 1
+    assert fake_conn.closed is True
+
+
+def test_crud_survives_unavailable_database(monkeypatch):
+    monkeypatch.setattr(repository, "obtenir_connexion", lambda provider=None: None)
+
+    ok, message = repository.inserer_souscription(
+        "Dupont", "Jean", "", "2026-07-01", "100", "CDF"
+    )
+    assert ok is False
+    assert "n'est pas accessible" in message
+
+    assert repository.recuperer_inventaire() == []
+    assert repository.get_archives() == []
+    assert repository.get_historique_locataire(1) == []
+
+    ok, message = repository.modifier_souscription(
+        1, "Dupont", "Jean", "", "2026-07-01", "100", "CDF"
+    )
+    assert ok is False
+    assert "n'est pas accessible" in message
+
+    ok, message = repository.supprimer_souscription(1)
+    assert ok is False
+    assert "n'est pas accessible" in message
+
+    ok, message = repository.mettre_a_jour_statut(1, "Litigieux")
+    assert ok is False
+    assert "n'est pas accessible" in message
+
+    ok, message = repository.ajouter_paiement_complementaire(1, "10")
+    assert ok is False
+    assert "n'est pas accessible" in message
+
+    ok, message = repository.restaurer_archive(1)
+    assert ok is False
+    assert "n'est pas accessible" in message
+
+
+def test_migrations_do_not_crash_without_database(monkeypatch):
+    monkeypatch.setattr(migrations, "obtenir_connexion", lambda: None)
+    migrations.run_migrations()

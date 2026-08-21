@@ -6,7 +6,11 @@ from typing import Any
 
 from mysql.connector import Error
 
-from tap.infrastructure.database.connection import obtenir_connexion
+from tap.infrastructure.database.connection import (
+    MESSAGE_BASE_INDISPONIBLE,
+    connexion_prete,
+    obtenir_connexion,
+)
 from tap.infrastructure.database.repository import _statuts_montant
 
 
@@ -28,6 +32,8 @@ def _apply_one(event: dict[str, Any]) -> dict[str, Any]:
     cursor = None
     try:
         conn = obtenir_connexion()
+        if not connexion_prete(conn):
+            return {"event_id": event_id, "status": "failed", "message": MESSAGE_BASE_INDISPONIBLE}
         cursor = conn.cursor(dictionary=True)
         cursor.execute("SELECT status FROM offline_sync_events WHERE event_id = %s", (event_id,))
         existing = cursor.fetchone()
@@ -63,7 +69,7 @@ def _apply_one(event: dict[str, Any]) -> dict[str, Any]:
     finally:
         if cursor is not None:
             cursor.close()
-        if conn is not None and conn.is_connected():
+        if connexion_prete(conn):
             conn.close()
 
 

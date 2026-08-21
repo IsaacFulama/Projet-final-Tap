@@ -54,8 +54,8 @@ class TestAuthenticationManager:
         password = "testpassword123"
         hashed = self.auth_manager._hash_password(password)
         
-        # Le hash doit contenir un sel et le hash
-        assert ":" in hashed
+        # Le hash doit contenir l'algorithme, les itÃ©rations et le sel.
+        assert hashed.startswith("pbkdf2_sha256$")
         assert hashed != password
         
         # Vérifier que le même mot de passe produit le même hash
@@ -174,7 +174,7 @@ class TestAuthenticationManager:
 class TestAuthenticateUser:
     """Tests pour la fonction utilitaire d'authentification."""
     
-    def test_authenticate_user_success(self):
+    def test_authenticate_user_accepts_delivered_default(self):
         """Teste l'authentification réussie via la fonction utilitaire."""
         success, message = authenticate_user("TAPADM", "TAPADM")
         assert success is True

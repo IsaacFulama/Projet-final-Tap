@@ -14,7 +14,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
-from tap.infrastructure.database.connection import obtenir_connexion
+from tap.infrastructure.database.connection import connexion_prete, obtenir_connexion
 
 
 @dataclass(frozen=True)
@@ -232,7 +232,7 @@ def load_latest_maintenance_report() -> dict[str, Any] | None:
     cursor = None
     try:
         conn = obtenir_connexion()
-        if not conn or not conn.is_connected():
+        if not connexion_prete(conn):
             return None
 
         cursor = conn.cursor()
@@ -300,7 +300,7 @@ def load_latest_maintenance_report() -> dict[str, Any] | None:
     finally:
         if cursor:
             cursor.close()
-        if conn and conn.is_connected():
+        if connexion_prete(conn):
             conn.close()
 
 
@@ -364,7 +364,7 @@ def get_monthly_data_by_status(status: str, month: str | None = None) -> list[tu
     cursor = None
     try:
         conn = obtenir_connexion()
-        if not conn or not conn.is_connected():
+        if not connexion_prete(conn):
             return []
 
         cursor = conn.cursor()
@@ -392,7 +392,7 @@ def get_monthly_data_by_status(status: str, month: str | None = None) -> list[tu
     finally:
         if cursor:
             cursor.close()
-        if conn and conn.is_connected():
+        if connexion_prete(conn):
             conn.close()
 
 
@@ -914,7 +914,7 @@ def get_overdue_reminder_candidates(reference_date: date | None = None) -> list[
     grouped: dict[int, dict[str, Any]] = {}
     try:
         conn = obtenir_connexion()
-        if not conn or not conn.is_connected():
+        if not connexion_prete(conn):
             return []
         cursor = conn.cursor()
         cursor.execute(
@@ -950,7 +950,7 @@ def get_overdue_reminder_candidates(reference_date: date | None = None) -> list[
     finally:
         if cursor:
             cursor.close()
-        if conn and conn.is_connected():
+        if connexion_prete(conn):
             conn.close()
 
 
@@ -1012,6 +1012,16 @@ def send_overdue_payment_reminders(
     try:
         if not dry_run:
             conn = obtenir_connexion()
+            if not connexion_prete(conn):
+                return {
+                    "status": "error",
+                    "sent": 0,
+                    "skipped": 0,
+                    "opened": 0,
+                    "errors": 1,
+                    "message": "La base de données n'est pas accessible.",
+                    "results": [],
+                }
             cursor = conn.cursor()
             cursor.execute(
                 """
@@ -1111,5 +1121,5 @@ def send_overdue_payment_reminders(
     finally:
         if cursor:
             cursor.close()
-        if conn and conn.is_connected():
+        if connexion_prete(conn):
             conn.close()

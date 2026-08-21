@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
 from typing import Any
 
 from mysql.connector import Error
 
 from tap.core.local_signature import decode_signature_image
-from tap.infrastructure.database.connection import obtenir_connexion
+from tap.infrastructure.database.connection import (
+    MESSAGE_BASE_INDISPONIBLE,
+    connexion_prete,
+    obtenir_connexion,
+)
 from tap.infrastructure.database.repository import (
     enregistrer_signature_et_mettre_a_jour_paiement,
 )
@@ -19,6 +22,8 @@ def create_portal_token(locataire_id: int, days: int = 30) -> tuple[str, datetim
     token = generate_access_token()
     expires_at = datetime.now(timezone.utc) + timedelta(days=max(1, min(days, 365)))
     conn = obtenir_connexion()
+    if not connexion_prete(conn):
+        raise ValueError(MESSAGE_BASE_INDISPONIBLE)
     cursor = conn.cursor()
     try:
         cursor.execute(
@@ -61,6 +66,8 @@ def _resolve_token(token: str, cursor) -> dict[str, Any] | None:
 
 def get_portal_data(token: str) -> dict[str, Any] | None:
     conn = obtenir_connexion()
+    if not connexion_prete(conn):
+        return None
     cursor = conn.cursor(dictionary=True)
     try:
         tenant = _resolve_token(token, cursor)
@@ -68,7 +75,7 @@ def get_portal_data(token: str) -> dict[str, Any] | None:
             return None
         cursor.execute(
             """
-            SELECT p.id, DATE_FORMAT(p.mois, '%%m/%%Y') AS mois,
+            SELECT p.id, DATE_FORMAT(p.mois, '%m/%Y') AS mois,
                    p.montant_total, p.montant_paye, p.reste_a_payer,
                    p.devise, p.statut, p.statut_paiement,
                    EXISTS(SELECT 1 FROM signatures_paiements s
@@ -99,6 +106,74 @@ def get_portal_data(token: str) -> dict[str, Any] | None:
         conn.close()
 
 
+def get_portal_payments(
+    token: str,
+    *,
+    search: str = "",
+    status: str = "",
+    date_from: str = "",
+    date_to: str = "",
+    amount_min: str = "",
+    amount_max: str = "",
+    payment_id: int | None = None,
+) -> dict[str, Any] | None:
+    """Retourne l'historique ou le detail, toujours limite au locataire du token."""
+    conn = obtenir_connexion()
+    if not connexion_prete(conn):
+        return None
+    cursor = conn.cursor(dictionary=True)
+    try:
+        tenant = _resolve_token(token, cursor)
+        if not tenant:
+            return None
+        clauses = ["p.locataire_id = %s"]
+        params: list[Any] = [tenant["locataire_id"]]
+        if payment_id is not None:
+            clauses.append("p.id = %s")
+            params.append(payment_id)
+        if search.strip():
+            clauses.append(
+                "(CAST(p.id AS CHAR) LIKE %s OR CONCAT('PAI-', p.id) LIKE %s "
+                "OR CONCAT('Loyer ', DATE_FORMAT(p.mois, '%m/%Y')) LIKE %s "
+                "OR p.devise LIKE %s OR p.statut LIKE %s)"
+            )
+            term = f"%{search.strip()}%"
+            params.extend([term, term, term, term, term])
+        if status.strip():
+            clauses.append("p.statut_paiement = %s")
+            params.append(status.strip())
+        if date_from.strip():
+            clauses.append("p.mois >= %s")
+            params.append(date_from.strip())
+        if date_to.strip():
+            clauses.append("p.mois <= %s")
+            params.append(date_to.strip())
+        if amount_min.strip():
+            clauses.append("p.montant_total >= %s")
+            params.append(amount_min.strip())
+        if amount_max.strip():
+            clauses.append("p.montant_total <= %s")
+            params.append(amount_max.strip())
+        cursor.execute(
+            """
+            SELECT p.id, p.mois, p.montant_total, p.montant_paye, p.reste_a_payer,
+                   p.devise, p.statut, p.statut_paiement,
+                   COALESCE(p.statut_paiement, p.statut, 'En attente') AS statut_affiche,
+                   CONCAT('PAI-', p.id) AS reference,
+                   CONCAT('Loyer ', DATE_FORMAT(p.mois, '%m/%Y')) AS prestation,
+                   'Non renseignée' AS methode_paiement,
+                   EXISTS(SELECT 1 FROM signatures_paiements s WHERE s.paiement_id = p.id) AS est_signe
+            FROM paiements p
+            WHERE """ + " AND ".join(clauses) + " ORDER BY p.mois DESC, p.id DESC",
+            tuple(params),
+        )
+        rows = cursor.fetchall()
+        return {"tenant": tenant, "payments": rows}
+    finally:
+        cursor.close()
+        conn.close()
+
+
 def sign_portal_payment(
     token: str,
     payment_id: int,
@@ -111,6 +186,8 @@ def sign_portal_payment(
         return False, "Consentement requis."
     signature_png = decode_signature_image(signature_data_url)
     conn = obtenir_connexion()
+    if not connexion_prete(conn):
+        return False, MESSAGE_BASE_INDISPONIBLE
     cursor = conn.cursor(dictionary=True)
     try:
         tenant = _resolve_token(token, cursor)
