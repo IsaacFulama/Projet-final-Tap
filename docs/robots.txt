@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://isaacfulama.github.io/Projet-final-Tap/sitemap.xml

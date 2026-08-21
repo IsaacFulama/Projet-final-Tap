@@ -19,6 +19,28 @@ C = {
     "tbl_head":   "#EEF3F8",
 }
 
+BRANDING = {
+    "name": "TAP",
+    "subtitle": "GESTION LOYERS",
+    "tagline": "ERP immobilier",
+}
+
+
+def apply_branding(branding: dict | None) -> None:
+    """Surcharge l'identité visuelle depuis config.json, sans obligation."""
+    if not isinstance(branding, dict):
+        return
+    for key in ("name", "subtitle", "tagline"):
+        value = branding.get(key)
+        if isinstance(value, str) and value.strip():
+            BRANDING[key] = value.strip()[:80]
+    for source, target in (("accent", "accent"), ("accent_dim", "accent_dim"),
+                           ("primary", "accent"), ("primary_hover", "accent_dim")):
+        value = branding.get(source)
+        if isinstance(value, str) and len(value) in (4, 7) and value.startswith("#"):
+            C[target] = value
+            MPL["accent"] = value
+
 MPL = {
     "bg":     "#FFFFFF",
     "axes":   "#FCFDFE",

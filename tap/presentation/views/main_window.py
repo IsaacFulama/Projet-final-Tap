@@ -7,7 +7,8 @@ from collections import Counter, defaultdict
 import csv
 import os
 
-from tap.config.theme import C, MPL, STATUS_COLORS
+from tap.config.theme import C, MPL, STATUS_COLORS, BRANDING, apply_branding
+from tap.config.settings import load_app_config
 from tap.config.responsive import (
     build_layout_profile,
     clamp_window_geometry,
@@ -44,6 +45,8 @@ from tap.presentation.dialogs.payment_proofs import PaymentProofsDialog
 
 ctk.set_appearance_mode("Light")
 ctk.set_default_color_theme("blue")
+
+apply_branding(load_app_config().get("branding", {}))
 
 
 # ── Helpers de robustesse pour dialogues CTk ────────────────────────────────
@@ -658,7 +661,7 @@ class AppGestionLoyers(ctk.CTk):
         else:
             self._ui_scale = 1.08
         self.configure(fg_color=C["bg_deep"])
-        self.title("TAP · Gestion des Loyers")
+        self.title(f"{BRANDING['name']} · {BRANDING['tagline']}")
         self._set_initial_geometry()
         self.minsize(
             max(680, min(980, self._screen.width - 20)),
@@ -791,11 +794,11 @@ class AppGestionLoyers(ctk.CTk):
 
         brand = ctk.CTkFrame(sb, fg_color="transparent")
         brand.pack(fill="x", padx=24, pady=(32, 0))
-        self.sidebar_brand = ctk.CTkLabel(brand, text="TAP",
+        self.sidebar_brand = ctk.CTkLabel(brand, text=BRANDING["name"],
                                           font=ctk.CTkFont(family="Georgia", size=42, weight="bold"),
                                           text_color=C["accent"])
         self.sidebar_brand.pack(anchor="w")
-        self.sidebar_subtitle = ctk.CTkLabel(brand, text="GESTION LOYERS",
+        self.sidebar_subtitle = ctk.CTkLabel(brand, text=BRANDING["subtitle"],
                                              font=ctk.CTkFont(size=10, weight="bold"),
                                              text_color=C["text_lo"])
         self.sidebar_subtitle.pack(anchor="w")
@@ -845,7 +848,7 @@ class AppGestionLoyers(ctk.CTk):
         for button in self.sidebar_buttons:
             button.pack(fill="x", pady=(0, 8))
 
-        self.sidebar_footer = ctk.CTkLabel(sb, text="v3.7  ·  TAP Loyers",
+        self.sidebar_footer = ctk.CTkLabel(sb, text=f"{BRANDING['tagline']}  ·  {BRANDING['name']}",
                                            font=ctk.CTkFont(size=10),
                                            text_color=C["text_lo"])
         self.sidebar_footer.pack(pady=20)
