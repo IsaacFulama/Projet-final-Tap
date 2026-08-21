@@ -44,6 +44,7 @@ from tap.presentation.dialogs.archives import DialogArchives
 from tap.presentation.dialogs.signature_qr import SignatureQRDialog
 from tap.presentation.dialogs.portal_qr import PortalQRDialog
 from tap.presentation.dialogs.payment_proofs import PaymentProofsDialog
+from tap.presentation.dialogs.admin_center import AdminCenterDialog
 
 ctk.set_appearance_mode("Light")
 ctk.set_default_color_theme("blue")
@@ -685,6 +686,7 @@ class AppGestionLoyers(ctk.CTk):
         self._signature_qr_dialog = None
         self._payment_proofs_dialog = None
         self._history_dialog = None
+        self._admin_center_dialog = None
 
         # Variables d'état
         self.status_var = StringVar(value="Prêt. Connectez-vous aux données ou ajoutez un paiement.")
@@ -833,6 +835,10 @@ class AppGestionLoyers(ctk.CTk):
                           fg_color=C["accent"], hover_color=C["accent_dim"],
                           text_color="#000000", font=ctk.CTkFont(size=13, weight="bold"),
                           command=self.ouvrir_formulaire)
+        self.btn_nav_admin = SidebarButton(nav, text="  Centre d'administration",
+                          fg_color=C["accent"], hover_color=C["accent_dim"],
+                          text_color="#000000", font=ctk.CTkFont(size=12, weight="bold"),
+                          command=self.ouvrir_centre_administration)
         self.btn_nav_records = SidebarButton(nav, text="  📋  Enregistrements",
                           fg_color=C["bg_section"], hover_color=C["border"],
                           text_color=C["text_hi"], command=self._show_records_page)
@@ -854,6 +860,7 @@ class AppGestionLoyers(ctk.CTk):
 
         self.sidebar_buttons = [
             self.btn_nav_nouveau,
+            self.btn_nav_admin,
             self.btn_nav_records,
             self.btn_nav_special,
             self.btn_nav_reminders,
@@ -1740,6 +1747,11 @@ class AppGestionLoyers(ctk.CTk):
                 self._schedule_automatic_maintenance()
 
     # ── LOGIQUE PRINCIPALE ───────────────────────────────────────────────────
+    def ouvrir_centre_administration(self):
+        """Ouvre le cockpit de pilotage de l'administrateur."""
+        self._fermer_dialogues_ouverts()
+        self._admin_center_dialog = AdminCenterDialog(self, self._all_data)
+
     def ouvrir_formulaire(self):
         # Sécurité : fermer tout dialogue existant avant d'en ouvrir un nouveau
         self._fermer_dialogues_ouverts()
@@ -1773,6 +1785,7 @@ class AppGestionLoyers(ctk.CTk):
             '_signature_qr_dialog',
             '_payment_proofs_dialog',
             '_history_dialog',
+            '_admin_center_dialog',
         ]
         for attr in dialog_attrs:
             dialog = getattr(self, attr, None)
