@@ -6,9 +6,11 @@ import matplotlib.ticker as mticker
 from collections import Counter, defaultdict
 import csv
 import os
+from pathlib import Path
+from PIL import Image
 
 from tap.config.theme import C, MPL, STATUS_COLORS, BRANDING, apply_branding
-from tap.config.settings import load_app_config
+from tap.config.settings import get_base_dir, load_app_config
 from tap.config.responsive import (
     build_layout_profile,
     clamp_window_geometry,
@@ -794,6 +796,20 @@ class AppGestionLoyers(ctk.CTk):
 
         brand = ctk.CTkFrame(sb, fg_color="transparent")
         brand.pack(fill="x", padx=24, pady=(32, 0))
+        logo_path = BRANDING.get("logo_path", "")
+        if logo_path:
+            try:
+                logo_file = Path(logo_path).expanduser()
+                if not logo_file.is_absolute():
+                    logo_file = get_base_dir() / logo_file
+                if logo_file.exists():
+                    self._brand_logo_image = ctk.CTkImage(
+                        light_image=Image.open(logo_file),
+                        size=(44, 44),
+                    )
+                    ctk.CTkLabel(brand, text="", image=self._brand_logo_image).pack(anchor="w", pady=(0, 8))
+            except Exception:
+                self._brand_logo_image = None
         self.sidebar_brand = ctk.CTkLabel(brand, text=BRANDING["name"],
                                           font=ctk.CTkFont(family="Georgia", size=42, weight="bold"),
                                           text_color=C["accent"])

@@ -23,6 +23,7 @@ BRANDING = {
     "name": "TAP",
     "subtitle": "GESTION LOYERS",
     "tagline": "ERP immobilier",
+    "logo_path": "",
 }
 
 
@@ -30,7 +31,7 @@ def apply_branding(branding: dict | None) -> None:
     """Surcharge l'identité visuelle depuis config.json, sans obligation."""
     if not isinstance(branding, dict):
         return
-    for key in ("name", "subtitle", "tagline"):
+    for key in ("name", "subtitle", "tagline", "logo_path"):
         value = branding.get(key)
         if isinstance(value, str) and value.strip():
             BRANDING[key] = value.strip()[:80]
