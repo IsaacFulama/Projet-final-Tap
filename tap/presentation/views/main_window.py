@@ -37,6 +37,7 @@ from tap.mobile.payment_links import create_payment_link
 from tap.mobile.runtime import portal_url, payment_link_url, configure_mobile_environment
 from tap.core.payment_service import PaymentService, SubscriptionFilters
 from tap.core.whatsapp_reports import send_overdue_payment_reminders
+from tap.core.audit_log import record_audit
 from tap.presentation.components.widgets import SidebarButton, StatCard
 from tap.presentation.dialogs.export_pdf import ExportPDFDialog
 from tap.presentation.dialogs.formulaire import FormulaireSouscription, NouveauSouscripteurDialog
@@ -649,8 +650,10 @@ class HistoriqueDialog(ctk.CTkToplevel):
 # ── Application principale ──────────────────────────────────────────────────
 
 class AppGestionLoyers(ctk.CTk):
-    def __init__(self):
+    def __init__(self, current_user: str = "TAPADM", user_role: str = "admin"):
         super().__init__()
+        self.current_user = current_user
+        self.user_role = user_role if user_role in {"admin", "manager", "comptable", "agent"} else "agent"
         self._screen = detect_screen_profile()
         short_side = min(self._screen.width, self._screen.height)
         if short_side < 900:
@@ -839,6 +842,8 @@ class AppGestionLoyers(ctk.CTk):
                           fg_color=C["accent"], hover_color=C["accent_dim"],
                           text_color="#000000", font=ctk.CTkFont(size=12, weight="bold"),
                           command=self.ouvrir_centre_administration)
+        if self.user_role != "admin":
+            self.btn_nav_admin.configure(state="disabled", text="  Administration (réservé)")
         self.btn_nav_records = SidebarButton(nav, text="  📋  Enregistrements",
                           fg_color=C["bg_section"], hover_color=C["border"],
                           text_color=C["text_hi"], command=self._show_records_page)
@@ -1750,7 +1755,11 @@ class AppGestionLoyers(ctk.CTk):
     def ouvrir_centre_administration(self):
         """Ouvre le cockpit de pilotage de l'administrateur."""
         self._fermer_dialogues_ouverts()
-        self._admin_center_dialog = AdminCenterDialog(self, self._all_data)
+        if self.user_role != "admin":
+            self._set_status("Accès réservé à l'administrateur.")
+            return
+        record_audit("open_admin_center", self.current_user)
+        self._admin_center_dialog = AdminCenterDialog(self, self._all_data, self.current_user)
 
     def ouvrir_formulaire(self):
         # Sécurité : fermer tout dialogue existant avant d'en ouvrir un nouveau

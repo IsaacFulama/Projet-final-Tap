@@ -47,7 +47,8 @@ class AuthenticationManager:
             "password_hash": hashed_password,
             "created_at": datetime.now(),
             "last_login": None,
-            "is_active": True
+            "is_active": True,
+            "role": "admin",
         }
         self._save_users()
         if self._storage_path is not None:
@@ -78,6 +79,7 @@ class AuthenticationManager:
                 "created_at": datetime.fromisoformat(value["created_at"]),
                 "last_login": datetime.fromisoformat(value["last_login"]) if value.get("last_login") else None,
                 "is_active": bool(value.get("is_active", True)),
+                "role": value.get("role", "agent"),
             } for name, value in users.items()}
             return True
         except (OSError, ValueError, KeyError, TypeError):
@@ -93,6 +95,7 @@ class AuthenticationManager:
                 "created_at": value["created_at"].isoformat(),
                 "last_login": value["last_login"].isoformat() if value["last_login"] else None,
                 "is_active": value["is_active"],
+                "role": value.get("role", "agent"),
             } for name, value in self._users.items()}}
             temporary = self._storage_path.with_suffix(".tmp")
             temporary.write_text(json.dumps(payload), encoding="utf-8")
@@ -246,7 +249,7 @@ class AuthenticationManager:
         logger.info(f"Mot de passe changé pour l'utilisateur {username}")
         return True, "Mot de passe changé avec succès"
     
-    def add_user(self, username: str, password: str) -> Tuple[bool, str]:
+    def add_user(self, username: str, password: str, role: str = "agent") -> Tuple[bool, str]:
         """
         Ajoute un nouvel utilisateur.
         
@@ -262,12 +265,15 @@ class AuthenticationManager:
         
         if len(password) < 8:
             return False, "Le mot de passe doit contenir au moins 8 caractères"
+        if role not in {"admin", "manager", "comptable", "agent"}:
+            return False, "Rôle invalide"
         
         self._users[username] = {
             "password_hash": self._hash_password(password),
             "created_at": datetime.now(),
             "last_login": None,
-            "is_active": True
+            "is_active": True,
+            "role": role,
         }
         self._save_users()
         logger.info(f"Nouvel utilisateur créé: {username}")
@@ -309,7 +315,8 @@ class AuthenticationManager:
             "username": username,
             "created_at": user["created_at"],
             "last_login": user["last_login"],
-            "is_active": user["is_active"]
+            "is_active": user["is_active"],
+            "role": user.get("role", "agent"),
         }
 
 

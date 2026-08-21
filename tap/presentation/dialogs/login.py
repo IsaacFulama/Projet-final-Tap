@@ -4,7 +4,7 @@ from typing import Optional
 
 from tap.config.theme import C
 from tap.config.responsive import clamp_window_geometry, detect_screen_profile
-from tap.core.auth import authenticate_user
+from tap.core.auth import authenticate_user, auth_manager
 
 
 class LoginDialog(ctk.CTk):
@@ -14,6 +14,8 @@ class LoginDialog(ctk.CTk):
         super().__init__()
         self.parent = parent
         self.authenticated = False
+        self.username = ""
+        self.user_role = "agent"
         self.password_visible = False
         self.attempts_remaining = 5
         self._screen = detect_screen_profile()
@@ -181,6 +183,8 @@ class LoginDialog(ctk.CTk):
         
         if success:
             self.authenticated = True
+            self.username = username
+            self.user_role = (auth_manager.get_user_info(username) or {}).get("role", "agent")
             self.quit()  # Quitter la boucle principale au lieu de destroy
         else:
             self.attempts_remaining -= 1

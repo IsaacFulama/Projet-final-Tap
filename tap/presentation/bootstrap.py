@@ -81,7 +81,7 @@ def launch_app() -> None:
                 login_dialog.destroy()
                 logger.info("Authentification réussie, lancement de l'application principale")
                 
-                app = AppGestionLoyers()
+                app = AppGestionLoyers(login_dialog.username, login_dialog.user_role)
                 app.mainloop()
                 
             except Exception as e:
