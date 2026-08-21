@@ -6,6 +6,7 @@ from decimal import Decimal
 import customtkinter as ctk
 
 from tap.config.theme import C
+from tap.core.admin_insights import build_admin_insights
 
 
 class AdminCenterDialog(ctk.CTkToplevel):
@@ -30,10 +31,9 @@ class AdminCenterDialog(ctk.CTkToplevel):
 
     def _build(self, records: list, username: str) -> None:
         records = list(records or [])
-        total = sum((self._amount(r, "total_amount") for r in records), Decimal("0"))
-        paid = sum((self._amount(r, "paid_amount") for r in records), Decimal("0"))
-        overdue = sum(1 for r in records if str(getattr(r, "payment_status", "")).lower() in {"litigieux", "en attente"})
-        pending = sum(1 for r in records if not getattr(r, "is_signed", False))
+        insights = build_admin_insights(records)
+        total, paid = insights["total"], insights["paid"]
+        overdue, pending = insights["overdue"], insights["unsigned"]
         header = ctk.CTkFrame(self, fg_color="transparent")
         header.pack(fill="x", padx=28, pady=(24, 12))
         ctk.CTkLabel(header, text="Centre d'administration", font=ctk.CTkFont(family="Georgia", size=28, weight="bold"), text_color=C["text_hi"]).pack(anchor="w")
@@ -46,7 +46,9 @@ class AdminCenterDialog(ctk.CTkToplevel):
             card.grid(row=0, column=column, padx=(0 if column == 0 else 8, 0), sticky="nsew")
             grid.grid_columnconfigure(column, weight=1)
             ctk.CTkLabel(card, text=label, font=ctk.CTkFont(size=10, weight="bold"), text_color=C["text_lo"]).pack(anchor="w", padx=14, pady=(14, 4))
-            ctk.CTkLabel(card, text=value, font=ctk.CTkFont(size=22, weight="bold"), text_color=color).pack(anchor="w", padx=14, pady=(0, 14))
+            value_label = ctk.CTkLabel(card, text="0", font=ctk.CTkFont(size=22, weight="bold"), text_color=color)
+            value_label.pack(anchor="w", padx=14, pady=(0, 14))
+            self._animate_value(value_label, value, suffix="")
         body = ctk.CTkFrame(self, fg_color=C["bg_section"], corner_radius=12)
         body.pack(fill="both", expand=True, padx=28, pady=12)
         ctk.CTkLabel(body, text="Actions prioritaires", font=ctk.CTkFont(size=16, weight="bold"), text_color=C["text_hi"]).pack(anchor="w", padx=18, pady=(18, 10))
@@ -55,6 +57,30 @@ class AdminCenterDialog(ctk.CTkToplevel):
         for label, command in (("Voir les enregistrements", self._records), ("Actualiser les données", self._refresh), ("Envoyer les rappels impayés", self._reminders), ("Exporter le rapport PDF", self._pdf)):
             ctk.CTkButton(actions, text=label, command=command, fg_color=C["bg_card"], hover_color=C["border"], text_color=C["text_hi"], border_width=1, border_color=C["border"], height=38).pack(fill="x", pady=4)
         ctk.CTkLabel(body, text="Commencez chaque journée par les dossiers à traiter, puis vérifiez les sauvegardes et les rappels envoyés.", text_color=C["text_lo"], wraplength=760, justify="left").pack(anchor="w", padx=18, pady=(18, 10))
+        intelligence = ctk.CTkFrame(body, fg_color=C["bg_card"], corner_radius=10, border_width=1, border_color=C["border"])
+        intelligence.pack(fill="x", padx=18, pady=(4, 18))
+        ctk.CTkLabel(intelligence, text="✦ Intelligence opérationnelle", font=ctk.CTkFont(size=14, weight="bold"), text_color=C["accent"]).pack(anchor="w", padx=14, pady=(12, 4))
+        ctk.CTkLabel(intelligence, text=f"Taux d'encaissement : {insights['collection_rate']:.1f}% · Reste à encaisser : {insights['remaining']:,.2f}", text_color=C["text_hi"]).pack(anchor="w", padx=14)
+        progress = ctk.CTkProgressBar(intelligence, height=8, progress_color=C["green"])
+        progress.pack(fill="x", padx=14, pady=8)
+        progress.set(max(0.0, min(1.0, insights["collection_rate"] / 100)))
+        ctk.CTkLabel(intelligence, text="\n".join(f"• {item}" for item in insights["recommendations"]), text_color=C["text_lo"], justify="left", anchor="w").pack(fill="x", padx=14, pady=(0, 12))
+
+    def _animate_value(self, label, value: str, suffix: str = ""):
+        try:
+            target = float(str(value).replace(",", ""))
+        except ValueError:
+            label.configure(text=value)
+            return
+        steps = 16
+        def tick(step=0):
+            if not label.winfo_exists():
+                return
+            current = target * min(1, (step + 1) / steps)
+            label.configure(text=f"{current:,.2f}{suffix}" if abs(target) >= 100 or "." in str(value) else f"{current:.0f}{suffix}")
+            if step + 1 < steps:
+                label.after(24, lambda: tick(step + 1))
+        tick()
 
     def _records(self):
         self.destroy(); self.parent._show_records_page()
