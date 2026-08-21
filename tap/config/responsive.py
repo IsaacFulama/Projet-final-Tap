@@ -67,6 +67,15 @@ def table_display_columns(profile_name: str) -> tuple[str, ...]:
     return TABLE_COLUMNS
 
 
+def records_page_uses_full_width(profile_name: str) -> bool:
+    """Réserve toute la largeur à la liste sur les écrans non larges.
+
+    Les cartes statistiques restent disponibles sur le tableau de bord ; sur la
+    page dédiée, la priorité est la lecture des enregistrements.
+    """
+    return profile_name != "wide"
+
+
 def detect_screen_profile() -> ScreenProfile:
     """Détecte la taille d'écran et le facteur DPI courant."""
     import tkinter as tk

@@ -972,6 +972,30 @@ def _build_overdue_reminder_message(candidate: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def build_smart_overdue_reminder_message(candidate: dict[str, Any]) -> str:
+    """Construit un rappel court, contextualisé et actionnable.
+
+    Le destinataire reçoit un résumé unique, le total dû et trois réponses
+    simples. Cela évite les longues listes et donne une marche à suivre claire
+    même lorsque l'envoi est préparé dans WhatsApp Web.
+    """
+    items = list(candidate.get("items") or [])
+    total = sum(float(item.get("reste_a_payer") or 0) for item in items)
+    devise = str(items[0].get("devise") or "") if items else ""
+    oldest = items[0].get("mois") if items else ""
+    oldest_text = oldest.strftime("%m/%Y") if hasattr(oldest, "strftime") else str(oldest)
+    urgency = "prioritaire" if len(items) >= 2 or total >= 500 else "à régulariser"
+    amount = f"{total:,.0f}".replace(",", " ")
+    name = f"{candidate.get('prenom', '')} {candidate.get('nom', '')}".strip()
+    return "\n".join([
+        f"Bonjour {name},",
+        f"🔔 Rappel {urgency} — votre compte TAP présente {len(items)} paiement(s) en attente.",
+        f"Total à régulariser : {amount} {devise} (depuis {oldest_text}).",
+        "Répondez simplement : 1️⃣ paiement effectué · 2️⃣ besoin d'un délai · 3️⃣ parler à la gestion.",
+        "Merci — TAP Gestion des Loyers",
+    ])
+
+
 def send_overdue_payment_reminders(
     reference_date: date | None = None,
     *,
@@ -1065,7 +1089,12 @@ def send_overdue_payment_reminders(
                     skipped += 1
                     continue
 
-            message = _build_overdue_reminder_message(candidate)
+            reminder_style = str(settings.get("style", "smart")).strip().lower()
+            message = (
+                build_smart_overdue_reminder_message(candidate)
+                if reminder_style == "smart"
+                else _build_overdue_reminder_message(candidate)
+            )
             if use_whatsapp_web_fallback:
                 result = open_whatsapp_web_reminder(message, candidate["telephone"])
             elif channel == "sms":

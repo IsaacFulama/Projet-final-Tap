@@ -16,7 +16,13 @@
   "overdue_reminders": {
     "enabled": true,
     "channel": "whatsapp",
-    "fallback": "whatsapp_web"
+    "fallback": "whatsapp_web",
+    "style": "smart"
+  },
+  "database_backup": {
+    "enabled": true,
+    "interval_days": 14,
+    "retention": 10
   },
   "automatic_maintenance": {
     "update_day": 7,
@@ -26,7 +32,7 @@
   },
   "mobile_portal": {
     "enabled": true,
-    "host": "127.0.0.1",
+    "host": "0.0.0.0",
     "port": 8765,
     "public_host": ""
   },

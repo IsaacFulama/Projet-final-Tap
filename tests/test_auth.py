@@ -185,5 +185,20 @@ class TestAuthenticateUser:
         assert success is False
 
 
+def test_auth_legacy_hash_and_empty_persisted_users_are_handled(tmp_path):
+    manager = AuthenticationManager()
+    salt = "legacy-salt"
+    import hashlib
+    legacy = f"{salt}:{hashlib.sha256(('secret' + salt).encode()).hexdigest()}"
+
+    assert manager._verify_password("secret", legacy) is True
+    assert manager._verify_password("wrong", legacy) is False
+
+    empty_store = tmp_path / "users.json"
+    empty_store.write_text('{"users": {}}', encoding="utf-8")
+    loaded = AuthenticationManager(empty_store)
+    assert "TAPADM" in loaded._users
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

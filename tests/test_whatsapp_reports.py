@@ -9,6 +9,7 @@ from tap.core.whatsapp_reports import (
     mark_as_sent,
     send_monthly_pdf_reports,
     send_whatsapp_report,
+    build_smart_overdue_reminder_message,
 )
 
 
@@ -30,6 +31,20 @@ def test_build_whatsapp_report_message_mentions_litigieux():
     assert "Période: 2026-09" in message
     assert "Clôture mensuelle: 4 création(s), 7 passage(s) en Litigieux, 1 erreur(s)." in message
     assert "Rappel litigieux: 3 paiement(s) en retard." in message
+
+
+def test_smart_overdue_reminder_is_short_and_actionable():
+    message = build_smart_overdue_reminder_message({
+        "nom": "DUPONT",
+        "prenom": "Jean",
+        "items": [
+            {"mois": "2026-08-01", "reste_a_payer": 120, "devise": "USD"},
+            {"mois": "2026-09-01", "reste_a_payer": 80, "devise": "USD"},
+        ],
+    })
+
+    assert "Total à régulariser : 200 USD" in message
+    assert "1️⃣" in message and "2️⃣" in message and "3️⃣" in message
 
 
 def test_sent_state_roundtrip(tmp_path: Path):

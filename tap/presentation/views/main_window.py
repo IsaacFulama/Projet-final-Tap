@@ -12,6 +12,7 @@ from tap.config.responsive import (
     build_layout_profile,
     clamp_window_geometry,
     detect_screen_profile,
+    records_page_uses_full_width,
     table_display_columns,
 )
 from tap.core.utils import (
@@ -1547,11 +1548,11 @@ class AppGestionLoyers(ctk.CTk):
 
         if hasattr(self, "left_pane") and hasattr(self, "right_pane"):
             try:
-                if profile.name == "compact":
+                if records_page_uses_full_width(profile.name):
                     self.left_pane.pack_forget()
                     self.right_pane.pack(side="top", fill="both", expand=True)
                     self.lbl_table_hint.configure(
-                        text="Écran compact : colonnes essentielles affichées. Double-clic pour voir tout le détail."
+                        text="Écran étroit : la liste occupe toute la largeur. Les colonnes secondaires restent accessibles avec la barre horizontale et dans l'historique."
                     )
                 else:
                     self.right_pane.pack_forget()

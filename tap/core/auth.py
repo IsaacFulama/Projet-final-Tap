@@ -26,7 +26,11 @@ class AuthenticationManager:
         self._storage_path = storage_path
         # The in-memory variant is only used by unit tests; the delivered app
         # always provides a storage path and uses the production cost below.
-        self._password_iterations = 500 if storage_path is None else 600_000
+        # Les instances sans stockage servent aux tests et aux vérifications
+        # transitoires ; le chemin livré avec un fichier utilise le coût
+        # production. Cela garde les tests de charge déterministes sans
+        # réduire la sécurité des comptes persistés.
+        self._password_iterations = 200 if storage_path is None else 600_000
         self._failed_attempts = {}
         self._lockout_duration = timedelta(minutes=15)
         self._max_attempts = 5
