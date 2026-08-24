@@ -11,7 +11,7 @@ from tap.infrastructure.database.connection import (
     obtenir_connexion,
 )
 
-MOIS_SQL_EXPR = "DATE_FORMAT(p.mois, '%m/%Y')"
+MOIS_SQL_EXPR = "to_char(p.mois, 'MM/YYYY')"
 
 
 def _show_error(message: str) -> None:
@@ -611,7 +611,7 @@ def get_souscriptions_avec_filtres(
         query = (
             f"SELECT p.id, l.id, l.nom, l.prenom, {MOIS_SQL_EXPR} AS mois, p.montant, p.devise, "
             "p.statut_souscription, p.statut, "
-            "DATE_FORMAT(p.date_creation, '%Y-%m-%d') as date_creation, "
+            "to_char(p.date_creation, 'YYYY-MM-DD') as date_creation, "
             "p.montant_total, p.montant_paye, p.reste_a_payer, p.statut_paiement, "
             "EXISTS(SELECT 1 FROM signatures_paiements sp WHERE sp.paiement_id = p.id) AS est_signe "
             "FROM paiements p "
@@ -1083,7 +1083,7 @@ def get_archives(
         query = (
             f"SELECT p.id, l.id, l.nom, l.prenom, {MOIS_SQL_EXPR} AS mois, p.montant, p.devise, "
             "p.statut_souscription, p.statut, "
-            "DATE_FORMAT(p.date_creation, '%Y-%m-%d') as date_creation, "
+            "to_char(p.date_creation, 'YYYY-MM-DD') as date_creation, "
             "p.montant_total, p.montant_paye, p.reste_a_payer, p.statut_paiement "
             "FROM archives_paiements p "
             "JOIN locataires l ON p.locataire_id = l.id "

@@ -1,13 +1,16 @@
+import os
 from collections.abc import Callable
 from typing import Protocol, runtime_checkable
 
-import mysql.connector
+import psycopg
+from psycopg.rows import dict_row
+from dotenv import load_dotenv
 
-from tap.config.settings import load_db_config
+load_dotenv(override=True)
 
 MESSAGE_BASE_INDISPONIBLE = (
     "La base de données n'est pas accessible. "
-    "Démarrez MySQL/MariaDB puis réessayez."
+    "Vérifiez votre connexion internet ou votre lien Supabase."
 )
 
 
@@ -17,7 +20,7 @@ def _sanitize_identifier(identifier: str) -> str:
 
 @runtime_checkable
 class ConnectionProtocol(Protocol):
-    def cursor(self): ...
+    def cursor(self, dictionary: bool = False, buffered: bool = False): ...
 
     def commit(self) -> None: ...
 
@@ -30,53 +33,73 @@ class ConnectionProtocol(Protocol):
 
 ConnectionProvider = Callable[[], ConnectionProtocol]
 
+class PsycopgCursorWrapper:
+    def __init__(self, cursor):
+        self._cursor = cursor
+        
+    def execute(self, query, params=None):
+        # Psycopg3 uses %s just like MySQL connector
+        # But we need to replace some MySQL specific queries maybe?
+        # Let's just pass it to psycopg.
+        return self._cursor.execute(query, params)
+        
+    def fetchone(self):
+        return self._cursor.fetchone()
+        
+    def fetchall(self):
+        return self._cursor.fetchall()
+        
+    def close(self):
+        self._cursor.close()
+        
+    @property
+    def rowcount(self):
+        return self._cursor.rowcount
+        
+    @property
+    def lastrowid(self):
+        return getattr(self._cursor, "lastrowid", None)
+        
+    def __iter__(self):
+        return iter(self._cursor)
+        
+    @property
+    def description(self):
+        return self._cursor.description
 
-class MySQLConnectionProvider:
-    """Fournisseur concret de connexions MySQL."""
+
+class PsycopgConnectionWrapper:
+    def __init__(self, conn):
+        self._conn = conn
+        
+    def cursor(self, dictionary: bool = False, buffered: bool = False):
+        if dictionary:
+            c = self._conn.cursor(row_factory=dict_row)
+        else:
+            c = self._conn.cursor()
+        return PsycopgCursorWrapper(c)
+        
+    def commit(self):
+        self._conn.commit()
+        
+    def rollback(self):
+        self._conn.rollback()
+        
+    def close(self):
+        self._conn.close()
+        
+    def is_connected(self):
+        return not self._conn.closed
+
+
+class SupabaseConnectionProvider:
+    """Fournisseur de connexions PostgreSQL (Supabase)."""
 
     def __call__(self) -> ConnectionProtocol:
-        config = load_db_config()
-        host = config["host"]
-        database = config["database"]
-        user = config["user"]
-        password = config["password"]
-        port = config.get("port", 3306)
-
-        try:
-            return mysql.connector.connect(
-                host=host,
-                database=database,
-                user=user,
-                password=password,
-                port=port,
-            )
-        except mysql.connector.Error as exc:
-            error_text = str(exc).lower()
-            if "unknown database" in error_text or "1049" in error_text:
-                fallback_conn = mysql.connector.connect(
-                    host=host,
-                    user=user,
-                    password=password,
-                    port=port,
-                )
-                try:
-                    cursor = fallback_conn.cursor()
-                    cursor.execute(
-                        f"CREATE DATABASE IF NOT EXISTS `{_sanitize_identifier(database)}`"
-                    )
-                    fallback_conn.commit()
-                    cursor.close()
-                finally:
-                    fallback_conn.close()
-
-                return mysql.connector.connect(
-                    host=host,
-                    database=database,
-                    user=user,
-                    password=password,
-                    port=port,
-                )
-            raise
+        dsn = os.getenv("SUPABASE_DB_URL")
+        if not dsn:
+            raise ValueError("SUPABASE_DB_URL n'est pas defini dans .env")
+        return PsycopgConnectionWrapper(psycopg.connect(dsn))
 
 
 class ResilientProviderWrapper:
@@ -127,16 +150,9 @@ def fermer_connexion(conn: ConnectionProtocol | None, cursor=None) -> None:
 
 
 def obtenir_connexion(provider: ConnectionProvider | None = None) -> ConnectionProtocol | None:
-    """Obtient une connexion via un fournisseur injectable.
-
-    Le provider par défaut reste MySQL, mais les couches amont peuvent injecter
-    un faux provider pour les tests ou un autre backend conforme au contrat.
-    Sans serveur MySQL, le provider résilient peut renvoyer None.
-    """
     active_provider = provider or _default_provider
     return active_provider()
 
 
 def get_default_connection_provider() -> ConnectionProvider:
-    """Expose le provider concret par défaut pour les usages avancés."""
     return _default_provider

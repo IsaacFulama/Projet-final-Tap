@@ -75,7 +75,7 @@ def get_portal_data(token: str) -> dict[str, Any] | None:
             return None
         cursor.execute(
             """
-            SELECT p.id, DATE_FORMAT(p.mois, '%m/%Y') AS mois,
+            SELECT p.id, to_char(p.mois, 'MM/YYYY') AS mois,
                    p.montant_total, p.montant_paye, p.reste_a_payer,
                    p.devise, p.statut, p.statut_paiement,
                    EXISTS(SELECT 1 FROM signatures_paiements s
@@ -134,7 +134,7 @@ def get_portal_payments(
         if search.strip():
             clauses.append(
                 "(CAST(p.id AS CHAR) LIKE %s OR CONCAT('PAI-', p.id) LIKE %s "
-                "OR CONCAT('Loyer ', DATE_FORMAT(p.mois, '%m/%Y')) LIKE %s "
+                "OR CONCAT('Loyer ', to_char(p.mois, 'MM/YYYY')) LIKE %s "
                 "OR p.devise LIKE %s OR p.statut LIKE %s)"
             )
             term = f"%{search.strip()}%"
@@ -160,7 +160,7 @@ def get_portal_payments(
                    p.devise, p.statut, p.statut_paiement,
                    COALESCE(p.statut_paiement, p.statut, 'En attente') AS statut_affiche,
                    CONCAT('PAI-', p.id) AS reference,
-                   CONCAT('Loyer ', DATE_FORMAT(p.mois, '%m/%Y')) AS prestation,
+                   CONCAT('Loyer ', to_char(p.mois, 'MM/YYYY')) AS prestation,
                    'Non renseignée' AS methode_paiement,
                    EXISTS(SELECT 1 FROM signatures_paiements s WHERE s.paiement_id = p.id) AS est_signe
             FROM paiements p

@@ -1,4 +1,12 @@
 {
+  "branding": {
+    "name": "TAP",
+    "subtitle": "GESTION LOYERS",
+    "tagline": "ERP immobilier",
+    "accent": "#C9A84C",
+    "accent_dim": "#A88537",
+    "public_domain": ""
+  },
   "database": {
     "host": "localhost",
     "database": "gestion_loyers",

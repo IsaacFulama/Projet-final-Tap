@@ -40,7 +40,7 @@ if __name__ == "__main__":
             launch_app()
             sys.exit(0)
         if "--demo-cycle" in sys.argv:
-            demo_date = _parse_demo_date(sys.argv)
+            demo_date = _parse_demo_date(sys.argv) 
             rapport = executer_demo_cycle_mensuel(demo_date)
             print(f"Démo mensuelle sur {rapport['date_demo']}")
             print(f"Créations mensuelles: {rapport['creations_speciales']}")

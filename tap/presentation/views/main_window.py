@@ -1386,11 +1386,11 @@ class AppGestionLoyers(ctk.CTk):
         self._table_style = ttk.Style()
         self._table_style.theme_use("default")
         self._table_style.configure("TAP.Treeview", background=C["bg_card"], foreground=C["text_hi"],
-                                    rowheight=44, fieldbackground=C["bg_card"],
-                                    borderwidth=0, font=("Segoe UI", 10))
+                                    rowheight=52, fieldbackground=C["bg_card"],
+                                    borderwidth=0, font=("Segoe UI", 11))
         self._table_style.configure("TAP.Treeview.Heading", background=C["tbl_head"],
                                     foreground=C["text_lo"], relief="flat",
-                                    font=("Segoe UI", 10, "bold"), padding=(12, 14))
+                                    font=("Segoe UI", 11, "bold"), padding=(14, 18))
         self._table_style.map("TAP.Treeview",
                               background=[("selected", C["tbl_select"])],
                               foreground=[("selected", C["text_hi"])])
