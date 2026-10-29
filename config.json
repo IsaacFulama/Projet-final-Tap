@@ -7,14 +7,17 @@
     "port": 3306
   },
   "whatsapp_reports": {
-    "enabled": true,
-    "recipients": ["+243852382067"],
+    "enabled": false,
+    "recipients": [],
     "check_internet": true,
     "send_monthly_pdf": true,
-    "report_types": ["en_regle", "litigieux"]
+    "report_types": [
+      "en_regle",
+      "litigieux"
+    ]
   },
   "overdue_reminders": {
-    "enabled": true,
+    "enabled": false,
     "channel": "whatsapp",
     "fallback": "whatsapp_web",
     "style": "smart"
@@ -28,7 +31,10 @@
     "update_day": 7,
     "special_rollover_enabled": false,
     "renew_recurring_rents": true,
-    "renewal_statuses": ["Simple", "Spécial"]
+    "renewal_statuses": [
+      "Simple",
+      "Spécial"
+    ]
   },
   "mobile_portal": {
     "enabled": true,
