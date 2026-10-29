@@ -75,3 +75,6 @@ htmlcov/
 TAP_Gestion_Loyers.spec
 LIVRAISON_CLIENT/
 dist/
+# Données temporaires et rapports d'exécution générés localement
+.pytest_tmp/
+error_reports/
