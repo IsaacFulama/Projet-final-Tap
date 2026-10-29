@@ -7,19 +7,38 @@
     "port": 3306
   },
   "whatsapp_reports": {
-    "enabled": true,
-    "recipients": ["+243852382067"],
+    "enabled": false,
+    "recipients": [],
     "check_internet": true,
-  "send_monthly_pdf": true,
-  "report_types": ["en_regle", "litigieux"]
+    "send_monthly_pdf": true,
+    "report_types": [
+      "en_regle",
+      "litigieux"
+    ]
   },
   "automatic_maintenance": {
     "update_day": 7,
     "renew_recurring_rents": true,
-    "renewal_statuses": ["Simple", "Spécial"]
+    "renewal_statuses": [
+      "Simple",
+      "Spécial"
+    ]
   },
   "monthly_report": {
-    "email": {"enabled": false, "host": "smtp.example.com", "port": 587, "starttls": true, "username": "", "password": "", "from": "", "recipients": []},
-    "whatsapp": {"enabled": false, "mode": "disabled", "recipient": ""}
+    "email": {
+      "enabled": false,
+      "host": "smtp.example.com",
+      "port": 587,
+      "starttls": true,
+      "username": "",
+      "password": "",
+      "from": "",
+      "recipients": []
+    },
+    "whatsapp": {
+      "enabled": false,
+      "mode": "disabled",
+      "recipient": ""
+    }
   }
 }

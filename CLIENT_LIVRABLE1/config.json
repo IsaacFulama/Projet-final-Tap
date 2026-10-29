@@ -7,8 +7,8 @@
     "port": 3306
   },
   "whatsapp_reports": {
-    "enabled": true,
-    "recipients": ["+243852382067"],
+    "enabled": false,
+    "recipients": [],
     "check_internet": true,
     "send_monthly_pdf": true
   }

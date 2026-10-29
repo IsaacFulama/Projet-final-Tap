@@ -75,3 +75,7 @@ htmlcov/
 TAP_Gestion_Loyers.spec
 LIVRAISON_CLIENT/
 dist/
+
+# Configuration locale contenant des paramètres privés
+config.local.json
+config.private.json
